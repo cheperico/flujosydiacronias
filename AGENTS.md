@@ -36,6 +36,7 @@ referenciados en **Dónde está la información** (al final) — consultar bajo 
 ```
 /
 ├── flujos.py                 # Entry point: TUI + CLI routing
+├── gui_fluir.py              # GUI tkinter "Fluir": selector de medios → envío OSC 9002 (delega en puente_td)
 ├── opencode.json
 ├── AGENTS.md                 # Este archivo
 ├── CHANGELOG.md
@@ -68,7 +69,8 @@ referenciados en **Dónde está la información** (al final) — consultar bajo 
 │   └── td/
 │       └── puente_td.py, elecciones.py, osc_probe.py, util_enter.py
 ├── td/
-│   ├── osc_callbacks.dat, elecciones_ui.dat, flujos.toe
+│   ├── osc_callbacks.dat, elecciones_ui.dat,
+│   │   fluir_callbacks.dat, crear_tablas_fluir.dat, flujos.toe
 ├── docs/
 │   ├── diseno_instalacion.md, motor_loop.md, arquitectura_motor.md, flujo_de_medios.md,
 │   │   linea_de_tiempo.md, geocodificacion_reversa.md, semantica_color.md, calculo_astronomico.md,
@@ -173,6 +175,7 @@ Detalle de args CLI de cada script en su **docstring** (o `python script.py --he
 | Script | Propósito | Integración TUI / CLI |
 |---|---|---|
 | `flujos.py` | Entry point único: TUI (6 submenús + Ayuda) + CLI routing | `python flujos.py <comando>`; sin args abre TUI |
+| `gui_fluir.py` | GUI tkinter "Fluir": selector de medios (horas/municipios/colores/tags con scroll, filtro, contadores, Todo/Nada) que delega el envío por 9002 en `puente_td._procesar_rafaga`; reemplaza chips de TD y listener 9001 | Standalone: `python gui_fluir.py` |
 | `db/util.py` | Conexiones DB (`abrir`, `conectar`, `resolver_db`) + `ModoHelper` | `from db.util import abrir, conectar, resolver_db, ModoHelper` |
 | `ingest.py` | Escanea carpeta, extrae metadatos/hashes/GPS, inserta en `media` | TUI Ingesta→1; CLI `flujos.py ingest --root <ruta>` |
 | `improve_db.py` | 9 pasos post-ingesta (colors, keywords, descriptions, combinado, transcribe, keypoints, timestamps, gps, video_metadata) | TUI Mejorar DB (3 hojas; embeddings retirado del TUI); CLI `flujos.py improve-db --steps X --mode Y` |
@@ -190,7 +193,7 @@ Detalle de args CLI de cada script en su **docstring** (o `python script.py --he
 | `ingest_textos.py` | Ingiere textos `.md` de `textos/` como medios type='text' (frontmatter + subtítulos `##` = textos individuales) | TUI Ingesta→5; CLI `flujos.py ingest-textos` / `textos` |
 | `exportar_csv.py` | Exporta tablas a CSV en `db/exports/<timestamp>/` | TUI Mantenimiento→7; CLI `flujos.py export-csv` |
 | `exportar_visualizacion.py` | Exporta snapshot de la DB → visualizacion.db; deploy genérico a deploy/ (por defecto) con copia de medios y transcode web | TUI Visualizaciones→2; CLI no (solo TUI) |
-| `td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter | TUI Visualizaciones→3; CLI `python scripts/td/puente_td.py <modo>` |
+| `td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD, 9002→TD resultado). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter; en `fluir`, si hay municipios elegidos, emite además el chat de Telegram (`/mensaje` ×N → tabla `fluir_telegram`, criterio web: rango de fechas de los medios, `es_sistema=0`, hora local UTC−3, texto ≤250 chars); flag `--no-enviar-telegram` | TUI Visualizaciones→3; CLI `python scripts/td/puente_td.py <modo>` |
 | `td/elecciones.py` | Nubes de elecciones (metadatos seleccionables: horas, municipios, colores, tags, días, clima) → TD vía OSC (9000) | Standalone: `python scripts/td/elecciones.py` |
 | `td/osc_probe.py` | Eco OSC: escucha lo que llega a un puerto y lo imprime. Test rápido TD→Python sin puente completo; el modo indefinido se detiene con Enter | TUI Visualizaciones→3; standalone: `python scripts/td/osc_probe.py 9001 [segundos]` |
 | `td/util_enter.py` | Helper compartido: `detener_con_enter()` devuelve un `threading.Event` que se setea al presionar Enter (salida limpia para escuchas continuas) | Usado por `puente_td.py` (fluir) y `osc_probe.py` |
@@ -342,6 +345,7 @@ Se consulta bajo demanda según la necesidad:
 | Motor de loop | `docs/motor_loop.md` | Spec del cerebro Python (arcos horarios, chiches, spec JSON) |
 | Deploy / visualización web | `docs/deploy.md` | Exportador genérico `exportar_visualizacion.py`, transcode web, snapshot local vs deploy |
 | Retorno "Fluir" en TD | `docs/retorno_fluir_td.md` | Contrato OSC 9002, tablas `fluir_*`, armado del receptor en TD |
+| GUI "Fluir" en Python | `docs/gui_fluir.md` | `gui_fluir.py`: selector de medios que reemplaza la UI de chips de TD; delega el envío por 9002 en `puente_td._procesar_rafaga` |
 | Videos 360° en web | `docs/videos_360_web.md` | Opciones de renderer 360° (Three.js, A-Frame...), requisitos de pipeline |
 | Rediseño de embeddings | `docs/embeddings_rediseno.md` | Dirección de diseño de la capa semántica (desactivada) |
 | Relojes de cámaras Insta360 desincronizados (videos 360° del viaje) | `docs/discrepancia_horarios_camaras.md` | Identificación de cámara (A=LA +7h / B=UTC+1 −1h / B reconfigurada), cómo deducir la hora real (embebido=UTC−3h), procedimiento reutilizable para videos nuevos |
@@ -358,7 +362,7 @@ Se consulta bajo demanda según la necesidad:
 - `elec_<id>_container<N>` — Container COMP por grupo; dentro cada uno tiene `replicator1` (Replicator COMP) que clona `boton_<id>_N`
 - `boton_<id>_0` — Button COMP "semilla"/template en la raíz de `/project2`; los `boton_<id>_N` (uno por opción del grupo) viven dentro del container del grupo
 - Hijos fijos de cada botón: `par1` (Parameter CHOP → lee la fila de `elec_<id>`), `text` (Text COMP → etiqueta), `parexec1` (Parameter Execute DAT), `panelexec1` (Panel Execute DAT) → dispara `/flujos/seleccion/<grupo> <valor>` por `osc_out1`
-- Tablas de datos del retorno "Fluir" (canal 9002; se crean con `td/crear_tablas_fluir.dat` y las llena `td/fluir_callbacks.dat` desde `/flujos/fluir/*`): `fluir_estado` (clave-valor), `fluir_fotos` / `fluir_videos` / `fluir_sonidos` (medios por tipo, columnas `[media_id, ruta, keypoint, hora, tipo]`), `fluir_textos` (textos; agrega `titulo` + `texto` = contenido real del texto como unidad de medio, vía `/flujos/fluir/texto`) y **`fluir_videos_360`** (videos 360° separados del resto — marker `media.subtype='360'`, escrito por `improve_db --step video_metadata`), `fluir_chiches` (hora, texto)
+- Tablas de datos del retorno "Fluir" (canal 9002; se crean con `td/crear_tablas_fluir.dat` y las llena `td/fluir_callbacks.dat` desde `/flujos/fluir/*`): `fluir_estado` (clave-valor), `fluir_fotos` / `fluir_videos` / `fluir_sonidos` (medios por tipo, columnas `[media_id, ruta, keypoint, hora, tipo]`), `fluir_textos` (textos; agrega `titulo` + `texto` = contenido real del texto como unidad de medio, vía `/flujos/fluir/texto`), **`fluir_videos_360`** (videos 360° separados del resto — marker `media.subtype='360'`, escrito por `improve_db --step video_metadata`), `fluir_chiches` (hora, texto) y **`fluir_telegram`** (chat de Telegram de los municipios elegidos: `[id, from_name, texto, hora, fecha, tipo, fotos, municipio]`, vía `/flujos/fluir/mensaje`; solo si hay municipios, criterio web = rango de fechas de los medios, `es_sistema=0`, hora local UTC−3)
 - **NO existen** (eliminados o legacy): `movie1`, `tabla_colores`, `nube_container`, `nube_datos`, `color_actual`, `seleccion_actual`, `info_imagen`. Los handlers de `osc_callbacks.dat` para colores/slideshow apuntan a ops todavía no recreadas (pipeline visual en construcción); los modos legacy de `puente_td.py` que enviaban a esas ops (colores, nube, imágenes de un color, loop completo) fueron eliminados — el CLI solo soporta `elecciones`/`fluir`
 
 ## Riesgos conocidos

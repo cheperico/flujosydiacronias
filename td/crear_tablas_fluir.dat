@@ -1,7 +1,7 @@
 # =============================================================================
 # crear_tablas_fluir.dat — Auto-creación de las tablas del "Fluir" (Table DAT)
 #
-# Crea las 7 tablas que espera `td/fluir_callbacks.dat` (receptor OSC 9002):
+# Crea las 8 tablas que espera `td/fluir_callbacks.dat` (receptor OSC 9002):
 #     fluir_estado   [clave, valor]
 #     fluir_fotos    [media_id, ruta, keypoint, hora, tipo]
 #     fluir_videos   [media_id, ruta, keypoint, hora, tipo]
@@ -9,10 +9,12 @@
 #     fluir_sonidos  [media_id, ruta, keypoint, hora, tipo]
 #     fluir_textos   [media_id, ruta, keypoint, hora, tipo, titulo, texto]
 #     fluir_chiches  [hora, texto]
+#     fluir_telegram [id, from_name, texto, hora, fecha, tipo, fotos, municipio]
 #
 # Los headers son EXACTOS a los que escribe fluir_callbacks.dat
 # (HEADER_MEDIO para las tablas de medios, HEADER_TEXTO para fluir_textos,
-# ["clave","valor"], ["hora","texto"]). No cambiarlos.
+# HEADER_TELEGRAM para fluir_telegram, ["clave","valor"], ["hora","texto"]).
+# No cambiarlos.
 #
 # IDEMPOTENTE: si la tabla ya existe NO se pisa; solo se normaliza la fila 0
 # (header). Se puede volver a correr en un toe ya armado sin romper nada.
@@ -51,6 +53,7 @@ TABLAS = {
     "fluir_sonidos": ["media_id", "ruta", "keypoint", "hora", "tipo"],
     "fluir_textos": ["media_id", "ruta", "keypoint", "hora", "tipo", "titulo", "texto"],
     "fluir_chiches": ["hora", "texto"],
+    "fluir_telegram": ["id", "from_name", "texto", "hora", "fecha", "tipo", "fotos", "municipio"],
 }
 
 

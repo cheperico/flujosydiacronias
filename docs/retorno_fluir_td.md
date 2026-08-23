@@ -38,20 +38,23 @@ Python: puente_td.py modo fluir
    │           Contenido real del texto como unidad de medio (titulo_seccion + texto_completo);
    │           la ruta .md del /medio no sirve para visualizar.
    │     /flujos/fluir/chiche <hora> <texto>   (0..N)
+   │     /flujos/fluir/mensaje <id> <from> <texto> <hora> <fecha> <tipo> <fotos> <municipio>  (0..N, solo con municipios)
    │     /flujos/fluir/fin   <total>
    ▼
 /project2/
    ├── osc_in2           (OSC In DAT, puerto 9002)   ← NUEVO, independiente
    │   └── osc_in2_callbacks  ◄── File: td/fluir_callbacks.dat (Sync to File ON)
-   │           ├─ /resumen → fluir_estado     (total, loop_secs, image, video, video360, audio, text)
+   │           ├─ /resumen → fluir_estado     (total, loop_secs, image, video, video360, audio, text, telegram)
    │           ├─ /tabla+/medio (+/texto si type='text') → fluir_fotos / fluir_videos / fluir_videos_360 / fluir_sonidos / fluir_textos
    │           ├─ /chiche → fluir_chiches
+   │           ├─ /mensaje → fluir_telegram   (chat de Telegram de los municipios elegidos)
    │           └─ /fin      → fluir_estado.fin=1 + cotejo y backfill de textos con td/spec_fluir.json
    ▼
    (consumo, opcional según etapa visual)
    ├── fluir_estado      (Table DAT clave-valor: total, loop_secs, por tipo, fin, recibidos/esperados)
    ├── fluir_fotos / fluir_videos / fluir_videos_360 / fluir_sonidos / fluir_textos  (Tablas por tipo; fluir_textos suma titulo/texto)
    ├── fluir_chiches     (Table DAT: hora, texto)
+   ├── fluir_telegram    (Table DAT: id, from_name, texto, hora, fecha, tipo, fotos, municipio)
    ├── fluir_loop        (Timeline o Count CHOP en loop 0..loop_secs)
    └── fluir_movie       (Movie File In TOP) → reproducción del loop
 ```
@@ -72,14 +75,15 @@ Antes de armar ningún operador hay que fijar el wire — esto lo escribe
 
 | Orden | Address | Args | Significado |
 |---|---|---|---|
-| 1 | `/flujos/fluir/resumen` | `i:int total`, `f:float loop_secs`, `i:image`, `i:video`, `i:audio`, `i:text`, `i:video360` | Resumen del lote: totales por tipo (de `spec["resumen"]`). `video` = videos **normales**; `video360` = videos 360° (separados) |
+| 1 | `/flujos/fluir/resumen` | `i:int total`, `f:float loop_secs`, `i:image`, `i:video`, `i:audio`, `i:text`, `i:video360`, `i:telegram` | Resumen del lote: totales por tipo (de `spec["resumen"]`). `video` = videos **normales**; `video360` = videos 360° (separados); `telegram` = mensajes del chat (0 si no hay municipios elegidos) |
 | 2 (por filtro activo; 0..N) | `/flujos/fluir/filtro` | `s:clave`, `s:valor` | Un filtro puesto por el usuario → fila `[clave, valor]` en `fluir_estado`. Claves: `hora_inicio`, `hora_fin`, `horas_elegidas` (siempre); `municipios`, `colores`, `tags`, `dias`, `clima` (solo si vienen) |
 | 3 (por tipo, orden estable image → video → video360 → audio → text; **solo si tiene medios**; el bloque `video360` solo se envía si hay videos 360°) | `/flujos/fluir/tabla` | `s:tipo`, `i:cantidad` | Comienza una tabla para un tipo |
 | 4 | `/flujos/fluir/medio` (×cantidad) | `i:media_id`, `s:ruta`, `f:keypoint`, `f:hora`, `s:tipo` | Un medio por mensaje; el tipo es el del bloque |
 | 5 (solo type='text', justo después de su /medio) | `/flujos/fluir/texto` | `i:media_id`, `s:titulo`, `s:texto` | Contenido real del texto como unidad de medio: `titulo_seccion` + `texto_completo` (se escribe en las columnas `titulo`/`texto` de `fluir_textos`; la ruta `.md` del `/medio` no sirve para visualizar) |
 | — (se repite tabla+medio (+texto si type='text') para cada tipo con medios) | | | |
 | 6 | `/flujos/fluir/chiche` (0..N) | `f:hora`, `s:texto` | Un chiche climático/astronómico |
-| 7 | `/flujos/fluir/fin` | `i:int total` | Marca de finalización del lote |
+| 7 (solo si hay municipios elegidos; tras chiches, antes de /fin) | `/flujos/fluir/tabla telegram` + `/flujos/fluir/mensaje` (×N) | `/tabla`: `s:telegram`, `i:cantidad`; `/mensaje`: `i:id`, `s:from_name`, `s:texto`, `f:hora`, `s:fecha`, `s:tipo`, `s:fotos`, `s:municipio` | Bloque del chat de Telegram: un mensaje por fila en `fluir_telegram`. `hora` es la **local** (UTC−3) de llegada; `fotos` es JSON de media_ids de fotos; `tipo` = message_type. No cuenta en los `recibidos/esperados` del `/fin` (valida medios) |
+| 8 | `/flujos/fluir/fin` | `i:int total` | Marca de finalización del lote |
 
 Puntos que conviene notar antes de programar:
 
@@ -103,6 +107,12 @@ Puntos que conviene notar antes de programar:
   visitante (`hora_inicio`, `hora_fin`, `horas_elegidas` siempre; más
   `municipios`, `colores`, `tags`, `dias`, `clima` si vienen). El puente lo
   genera desde `spec["resumen"]["filtros"]` / `spec["resumen"]["rango_horas"]`.
+- **El bloque `/mensaje` replica el criterio de la web** (`deploy/api/
+  mensajes_telegram.php`): por municipio elegido toma el rango de fechas de sus
+  medios (`MIN/MAX timestamp_utc`) y envía los mensajes del chat dentro de esa
+  ventana, excluyendo los de sistema (`es_sistema=0`). Si el visitante no elige
+  municipios, no se envía el bloque (el resumen reporta `telegram=0`). El texto
+  se trunca a 250 chars y las fotos viajan como JSON de media_ids.
 - **El archivo `td/spec_fluir.json` se escribe ANTES del primer mensaje OSC** y
   ahora **no es la fuente única**: se lee para **cotejar** (debug de pérdida
   UDP) y para el **backfill anti-pérdida** de textos en `fin`.
@@ -148,8 +158,8 @@ Puntos que conviene notar antes de programar:
 
 **Objetivo**: implementar el cerebro de recepción: distribuir los mensajes del
 contrato **por tipo** en tablas separadas (`fluir_fotos`, `fluir_videos`,
-`fluir_videos_360`, `fluir_sonidos`, `fluir_textos`), mantener `fluir_estado`
-y `fluir_chiches`, y
+`fluir_videos_360`, `fluir_sonidos`, `fluir_textos`), mantener `fluir_estado`,
+`fluir_chiches` y `fluir_telegram` (chat de Telegram), y
 en `fin` cotejar recibido vs esperado (+ el spec JSON).
 
 **Instrucción**:
@@ -177,8 +187,9 @@ el `.toe`.
 - **Helper central**: `_tabla_para_tipo(tipo)` devuelve el nombre de tabla
   correcto (4 tablas de medios con la misma estructura; `fluir_textos` suma
   `titulo`/`texto` para el contenido real).
-- **Router**: `_enrutar(address, args)` por **address absoluto** — los 7
-  addresses son fijos.
+- **Router**: `_enrutar(address, args)` por **address absoluto** — los 8
+  addresses son fijos (`/resumen`, `/filtro`, `/tabla`, `/medio`, `/texto`,
+  `/chiche`, `/mensaje`, `/fin`).
 - **Guardas**: si falta una tabla destino, advertencia clara y `return`.
 
 ### 3.2 Esqueleto de `fluir_callbacks.dat` (listo para copiar/pegar)
@@ -209,6 +220,10 @@ El cerebro Python (`scripts/td/puente_td.py` modo 'fluir') envía por el puerto
             Contenido real del texto como unidad de medio (titulo_seccion + texto_completo).
             Escribe titulo/texto en la fila del media_id en fluir_textos.
     /flujos/fluir/chiche <hora> <texto>   (0..N, chiches climáticos/astronómicos)
+    /flujos/fluir/mensaje <id> <from_name> <texto> <hora> <fecha> <tipo> <fotos> <municipio>
+        (0..N, solo si el visitante eligió municipio(s)) Un mensaje de Telegram del
+        chat (es_sistema=0) dentro del rango de fechas de los municipios elegidos.
+        Se guardan como filas en fluir_telegram.
     /flujos/fluir/fin   <total>           (fin de lote)
 
 keypoint = ubicación temporal del medio DENTRO del loop, en segundos sobre
@@ -231,6 +246,7 @@ titulo/texto para el contenido real del medio, ver abajo):
   fluir_sonidos [media_id, ruta, keypoint, hora, tipo]  <- audio
   fluir_textos  [media_id, ruta, keypoint, hora, tipo, titulo, texto]  <- text
   fluir_chiches [hora, texto]
+  fluir_telegram [id, from_name, texto, hora, fecha, tipo, fotos, municipio]  <- telegram (chat)
 
 Un único helper _tabla_para_tipo(tipo) resuelve el nombre de tabla correcto
 para cada tipo: image -> fluir_fotos, video -> fluir_videos, video360 ->
@@ -263,6 +279,11 @@ HEADER_MEDIO = ["media_id", "ruta", "keypoint", "hora", "tipo"]
 # texto_completo) por /flujos/fluir/texto, que se escribe en las columnas 5 y 6.
 HEADER_TEXTO = ["media_id", "ruta", "keypoint", "hora", "tipo", "titulo", "texto"]
 
+# Mensajes de Telegram del chat: acompañan al loop pero NO son medios del arco
+# (sin keypoint; la hora es la LOCAL de llegada del mensaje, UTC-3). Los llena
+# el mensaje /flujos/fluir/mensaje.
+HEADER_TELEGRAM = ["id", "from_name", "texto", "hora", "fecha", "tipo", "fotos", "municipio"]
+
 # Tipo anunciado por el último /tabla (contexto para logs y debug).
 _tipo_actual = None
 
@@ -293,6 +314,8 @@ def _enrutar(address, args):
         _recibir_texto(args)
     elif address == OSC_ADDR_FLUIR + "/chiche":
         _recibir_chiche(args)
+    elif address == OSC_ADDR_FLUIR + "/mensaje":
+        _recibir_mensaje(args)
     elif address == OSC_ADDR_FLUIR + "/fin":
         _recibir_fin(args)
     else:
@@ -352,6 +375,7 @@ def _recibir_resumen(args):
     n_audio = int(args[4]) if len(args) > 4 and args[4] is not None else 0
     n_text = int(args[5]) if len(args) > 5 and args[5] is not None else 0
     n_video360 = int(args[6]) if len(args) > 6 and args[6] is not None else 0
+    n_telegram = int(args[7]) if len(args) > 7 and args[7] is not None else 0
 
     _total_esperado = total
     _tipo_actual = None
@@ -364,6 +388,7 @@ def _recibir_resumen(args):
     tabla.appendRow(["video360", n_video360])
     tabla.appendRow(["audio", n_audio])
     tabla.appendRow(["text", n_text])
+    tabla.appendRow(["telegram", n_telegram])
     tabla.appendRow(["fin", 0])
 
     # Lote nuevo: vaciar tablas por tipo y chiches con su header.
@@ -374,10 +399,13 @@ def _recibir_resumen(args):
     t_chiches = _tabla("fluir_chiches")
     if t_chiches is not None:
         _limpiar(t_chiches, ["hora", "texto"])
+    t_tg = _tabla("fluir_telegram")
+    if t_tg is not None:
+        _limpiar(t_tg, HEADER_TELEGRAM)
 
     print(f"{PREFIJO_LOG} Resumen: {total} medios (image={n_image}, "
           f"video={n_video}, video360={n_video360}, audio={n_audio}, text={n_text}), "
-          f"loop de {loop_secs}s")
+          f"telegram={n_telegram}, loop de {loop_secs}s")
 
 
 def _recibir_filtro(args):
@@ -417,11 +445,16 @@ def _recibir_tabla(args):
     cantidad = int(args[1]) if len(args) > 1 and args[1] is not None else 0
     _tipo_actual = tipo
 
-    nombre = _tabla_para_tipo(tipo)
+    if tipo == "telegram":
+        nombre = "fluir_telegram"
+        header = HEADER_TELEGRAM
+    else:
+        nombre = _tabla_para_tipo(tipo)
+        header = HEADER_TEXTO if tipo == "text" else HEADER_MEDIO
 
     t = _tabla(nombre)
     if t is not None:
-        _limpiar(t, HEADER_TEXTO if tipo == "text" else HEADER_MEDIO)
+        _limpiar(t, header)
 
     print(f"{PREFIJO_LOG} Tabla {tipo}: {cantidad} medios esperados")
 
@@ -521,6 +554,41 @@ def _recibir_chiche(args):
     if tabla.numRows == 0:
         tabla.appendRow(["hora", "texto"])
     tabla.appendRow([hora, texto])
+
+
+def _recibir_mensaje(args):
+    """Acumula un mensaje de Telegram del chat en fluir_telegram.
+
+    El puente envía /flujos/fluir/mensaje tras /tabla telegram (solo si el
+    visitante eligió municipio(s)). Columnas HEADER_TELEGRAM:
+    [id, from_name, texto, hora, fecha, tipo, fotos, municipio].
+    """
+    if len(args) < 8:
+        print(f"{PREFIJO_LOG} Mensaje 'mensaje' incompleto: {args}")
+        return
+
+    id_tg = int(str(args[0])) if args[0] is not None else 0
+    from_name = str(args[1] or "")
+    texto = str(args[2] or "")
+    hora = float(args[3]) if args[3] is not None else 0.0
+    fecha = str(args[4] or "")
+    tipo = str(args[5] or "")
+    fotos = str(args[6] or "")
+    municipio = str(args[7] or "")
+
+    tabla = _tabla("fluir_telegram")
+    if tabla is None:
+        return
+
+    # Seguridad: si la tabla quedó vacía (resumen perdido), escribir header.
+    if tabla.numRows == 0:
+        tabla.appendRow(list(HEADER_TELEGRAM))
+    if tabla.numCols < 8:
+        _limpiar(tabla, HEADER_TELEGRAM)
+
+    tabla.appendRow([id_tg, from_name, texto, hora, fecha, tipo, fotos, municipio])
+
+    print(f'{PREFIJO_LOG} Telegram: {id_tg} "{from_name}" ({municipio})')
 
 
 def _recibir_fin(args):
@@ -693,14 +761,17 @@ parsear código dentro de los operadores de renderizado.
 | `fluir_sonidos` | Table DAT | `media_id`, `ruta`, `keypoint`, `hora`, `tipo` — medios `audio` desde OSC |
 | `fluir_textos` | Table DAT | `media_id`, `ruta`, `keypoint`, `hora`, `tipo`, `titulo`, `texto` — medios `text` desde OSC; **única tabla de medios con 7 columnas** (`titulo` + `texto` = contenido real del texto) |
 | `fluir_chiches` | Table DAT | `hora`, `texto` — eventos ambientales desde OSC |
+| `fluir_telegram` | Table DAT | `id`, `from_name`, `texto`, `hora`, `fecha`, `tipo`, `fotos`, `municipio` — chat de Telegram de los municipios elegidos (desde `/mensaje`; `hora` = local UTC−3, `fotos` = JSON de media_ids) |
 
 **Por qué**: 4 de las 5 tablas por tipo comparten estructura (`[media_id,
 ruta, keypoint, hora, tipo]`) y el callbacks las llena con un único helper
 `_tabla_para_tipo()`; **`fluir_textos` es la excepción**: suma `titulo`/`texto`
 porque lleva el contenido real del texto (la ruta `.md` no es visualizable
-directamente). Separar por tipo deja que el motor lea solo la clase que le
-toca reproducir (fotos → TOP + Text, videos → Movie, sonidos → Audio/Text,
-textos → Text), sin recorrer una lista mixta.
+directamente). `fluir_telegram` es un canal aparte (no es medio del loop): su
+`hora` es la de llegada del mensaje (no un keypoint) y **no cuenta** en los
+`recibidos/esperados` que valida el `/fin`. Separar por tipo deja que el motor
+lea solo la clase que le toca reproducir (fotos → TOP + Text, videos → Movie,
+sonidos → Audio/Text, textos → Text), sin recorrer una lista mixta.
 
 ---
 
@@ -812,14 +883,17 @@ de pipeline visual, pero los nombres y tablas quedan disponibles.
       real del texto); si ya existe con 5 columnas, re-correr
       `crear_tablas_fluir.dat` la normaliza a 7.
 - [ ] **`fluir_chiches`** — Table DAT (hora, texto).
+- [ ] **`fluir_telegram`** — Table DAT (id, from_name, texto, hora, fecha, tipo,
+      fotos, municipio) — chat de Telegram de los municipios elegidos; se llena
+      con `/mensaje` (se crea con `crear_tablas_fluir.dat`, igual que el resto).
 - [ ] (Opcional, etapa visual) **`fluir_loop`** Timeline CHOP; **`fluir_movie`**
       Movie File In TOP; **`fluir_engine`** Script DAT con el planificador (scheduler).
 - [ ] Verificación de punta a punta (3 terminales):
       `python scripts/td/puente_td.py fluir --una-vez`, un terminal con
       `python scripts/td/osc_probe.py 9002 5`, y en TD chequear que
       `fluir_fotos/fluir_videos/fluir_videos_360/fluir_sonidos/fluir_textos`
-      se llenan y `fluir_estado.fin = 1` al terminar (y `recibidos` ==
-      `esperados`).
+      se llenan, `fluir_telegram` recibe el chat si se eligió un municipio, y
+      `fluir_estado.fin = 1` al terminar (y `recibidos` == `esperados`).
 
 ---
 
@@ -836,9 +910,10 @@ de pipeline visual, pero los nombres y tablas quedan disponibles.
 | 7 | Tabla de audio: `fluir_sonidos` vs `fluir_audios` | **Resuelta** → `fluir_sonidos` | consistente con español del proyecto (un docstring de `puente_td.py` dice `audios`, pero la decisión es `sonidos`) |
 | 8 | Significado de `keypoint` | **Resuelta** | `keypoint` = `t_loop`: posición en segundos dentro del loop (0..loop_secs) — se usa tal cual del wire |
 | 9 | El estado refleja el filtro del usuario | **Resuelta** | `spec["resumen"]["filtros"]` + mensaje `/flujos/fluir/filtro <clave> <valor>` → filas en `fluir_estado` (hora_inicio, hora_fin, horas_elegidas, municipios, colores, tags, dias, clima). Así TD muestra qué eligió el visitante, no solo totales |
-| 10 | Videos 360° separados del resto | **Resuelta** | tabla propia `fluir_videos_360` (misma estructura `[media_id, ruta, keypoint, hora, tipo]`); el marker es `media.subtype='360'`, escrito por `improve_db --step video_metadata`; el puente los separa en el bloque `video360` (orden image → video → video360 → audio → text) y el resumen lleva **7 args** con `video360` al final (`video` = solo normales). El spec JSON mantiene TODOS los videos bajo `por_tipo["video"]` con el campo `es_360` por ítem (lo agrega `loop_db.py`); el cotejo TD espera los video360 desde ahí, no de una clave `por_tipo["video360"]` |
+| 10 | Videos 360° separados del resto | **Resuelta** | tabla propia `fluir_videos_360` (misma estructura `[media_id, ruta, keypoint, hora, tipo]`); el marker es `media.subtype='360'`, escrito por `improve_db --step video_metadata`; el puente los separa en el bloque `video360` (orden image → video → video360 → audio → text) y el resumen lleva **8 args** con `video360` en 7ª posición y `telegram` al final (`video` = solo normales). El spec JSON mantiene TODOS los videos bajo `por_tipo["video"]` con el campo `es_360` por ítem (lo agrega `loop_db.py`); el cotejo TD espera los video360 desde ahí, no de una clave `por_tipo["video360"]` |
 | 11 | Contenido real de los textos en TD | **Resuelta** | mensaje separado `/flujos/fluir/texto <media_id> <titulo> <texto>` justo después de `/medio`, solo para type='text'; lleva el contenido real como unidad de medio (`titulo_seccion` + `texto_completo`, truncado de seguridad a 8000 chars); sin ubicación/tags en las tablas — lo resuelve el servidor de DB; guard `numCols` en `_recibir_medio`/`_recibir_texto` ante pérdida de `/tabla text` (UDP) |
 | 12 | Backfill anti-pérdida de textos + fix de API Table DAT | **Resuelta** | al `/fin`, `_completar_textos_desde_spec()` completa `titulo`/`texto` en `fluir_textos` desde `td/spec_fluir.json` cuando el mensaje `/flujos/fluir/texto` se pierde por UDP (ráfagas grandes); celdas de Table DAT se escriben con `tabla[fila, col] = valor` (`setCell` no existe en `td.tableDAT`) |
+| 13 | Chat de Telegram en el Fluir | **Resuelta** | tabla propia `fluir_telegram` (no es medio del loop: sin keypoint; `hora` = local UTC−3 de llegada). Se envía dentro de `_procesar_rafaga` SOLO si hay municipios elegidos (bloque `/tabla telegram` + `/mensaje` ×N), replicando el criterio web (rango de fechas de los medios del municipio, `es_sistema=0`, texto truncado a 250 chars, `fotos` como JSON de media_ids). No cuenta en los `recibidos/esperados` del `/fin`; el resumen lo reporta como `telegram=N` |
 
 ---
 

@@ -246,6 +246,7 @@ Todas las operaciones que modifican la DB preguntan el modo
 | Script | Propósito | Pipeline |
 |--------|-----------|----------|
 | `flujos.py` | Entry point unificado con subcomandos y TUI | — |
+| `gui_fluir.py` | GUI tkinter "Fluir": selector de medios (scroll, filtro, contadores, Todo/Nada) que delega el envío por OSC 9002 en `puente_td._procesar_rafaga`; reemplaza chips de TD y listener 9001 | Instalación |
 | `scripts/ingest.py` | Escanea, extrae metadatos e ingiere en DB | Ingesta |
 | `scripts/ingest_gpx.py` | Ingesta de tracks GPS (GPX): waypoints, registro, backfill de altitud | Ingesta |
 | `scripts/import_telegram.py` | Importa exports de Telegram a la DB (chats, mensajes, multimedia vinculado y opcionalmente en `media`) | Ingesta |
@@ -263,7 +264,7 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/astronomia.py` | Posición del sol (NOAA), clasificación twilight | Enriquecimiento |
 | `scripts/limpiar_tandas.py` | Selección de mejor imagen por tanda | Curación |
 | `scripts/mover_descartadas.py` | Mueve imágenes descartadas a carpeta excluir/ | Curación |
-| `scripts/td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter | Instalación |
+| `scripts/td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD, 9002→TD resultado). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter; en `fluir`, si hay municipios elegidos, emite además el chat de Telegram a la tabla `fluir_telegram` (flag `--no-enviar-telegram`) | Instalación |
 | `scripts/td/elecciones.py` | Nubes de elecciones (horas, municipios, colores, tags, días, clima) → TD vía OSC | Instalación |
 | `scripts/td/osc_probe.py` | Eco OSC: escucha lo que llega a un puerto y lo imprime (test rápido TD→Python) | Instalación |
 | `scripts/td/util_enter.py` | Helper compartido: `detener_con_enter()` devuelve un `threading.Event` (salida limpia con Enter) | Instalación |
@@ -720,6 +721,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 | `docs/motor_loop.md` | Spec del motor de loop (arcos horarios, posicionamiento, chiches, spec JSON) |
 | `docs/deploy.md` | Exportador genérico de deploy (snapshot, transcode web, snapshot local vs deploy) |
 | `docs/retorno_fluir_td.md` | Retorno "Fluir" en TD: contrato OSC 9002, tablas `fluir_*`, armado del receptor |
+| `docs/gui_fluir.md` | GUI "Fluir" en Python: selector de medios que reemplaza la UI de chips de TD y envía por 9002 |
 | `docs/lecciones_elecciones_td.md` | Lecciones del armado de elecciones en TD (mapa real de operadores, canales OSC) |
 | `docs/videos_360_web.md` | Opciones de renderer 360° en web (Three.js, A-Frame...) y requisitos de pipeline |
 | `docs/discrepancia_horarios_camaras.md` | Relojes desincronizados de cámaras Insta360 (A=LA +7h / B=UTC+1 −1h / B reconfigurada); cómo deducir la hora real (embebido=UTC−3h); procedimiento reutilizable para videos nuevos |
@@ -735,6 +737,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 /
 ├── flujos.py                  # Entry point unificado (TUI + CLI)
+├── gui_fluir.py               # GUI "Fluir": selector de medios → envío OSC 9002
 ├── AGENTS.md                  # Documentación exhaustiva del proyecto
 ├── VISION.md                  # Concepto de la instalación
 ├── ROADMAP.md                 # Estado y prioridades

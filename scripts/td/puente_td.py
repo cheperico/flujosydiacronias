@@ -6,7 +6,9 @@ Modos:
                  municipios, colores, tags, días, clima) al motor de TD
   fluir        → escucha la ráfaga de selección del botón "Fluir" (9001),
                  acumula por grupo, detecta el fin, genera el spec del loop
-                 con loop_db.generar_loop y lo envía por 9002
+                 con loop_db.generar_loop y lo envía por 9002 (medios por
+                 tipo, chiches y, si hay municipios elegidos, los mensajes
+                 de Telegram del chat como bloque /mensaje → fluir_telegram)
 
 Uso básico:
   python scripts/td/puente_td.py elecciones           # nubes de elecciones
@@ -15,9 +17,12 @@ Uso básico:
 """
 
 import argparse
+import json
 import logging
+import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,7 +35,7 @@ from pythonosc import udp_client
 from pythonosc import osc_server
 from pythonosc import dispatcher
 
-from db.util import resolver_db
+from db.util import abrir, resolver_db
 # util_enter.py vive en scripts/td/ (misma carpeta que este script)
 if __package__ is None:
     import sys, os as _os
@@ -202,6 +207,132 @@ def _separar_videos_360(por_tipo: dict) -> tuple[list, list]:
     return normales, es360
 
 
+# ── Telegram (chat que acompaña al loop) ─────────────────────────────────────
+
+# Zona horaria del viaje (Argentina, UTC-3). Los mensajes de Telegram se
+# almacenan con date_utc (ISO 8601 UTC); la instalación los agrupa por hora
+# LOCAL, igual que los medios del loop (mismo criterio que loop_db._extraer_hora
+# y que app.js de la web: hora_utc - 3).
+_ZONA_ARGENTINA = timezone(timedelta(hours=-3))
+
+# Límite defensivo de longitud del texto de cada mensaje antes de enviarlo a TD
+# (decisión de diseño: un chat renderizable en TD; la web recorta a 150 chars).
+MAX_TEXTO_TELEGRAM = 250
+
+
+def _parsear_fecha_utc(valor: Optional[str]) -> Optional[datetime]:
+    """Parsea un date_utc de Telegram (ISO 8601) a datetime aware UTC."""
+    if not valor:
+        return None
+    texto = str(valor).strip()
+    try:
+        dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _hora_local_mensaje(date_utc: Optional[str]) -> float:
+    """Hora local (float 0..23.99) de un date_utc de Telegram, UTC→UTC-3.
+
+    Replica el criterio de app.js (hora - 3 con wrap) para que la hora del
+    mensaje coincida con la hora del loop (Argentina).
+    """
+    dt = _parsear_fecha_utc(date_utc)
+    if dt is None:
+        return 0.0
+    local = dt.astimezone(_ZONA_ARGENTINA)
+    return local.hour + local.minute / 60.0 + local.second / 3600.0
+
+
+def _consultar_mensajes_telegram(
+    conn: sqlite3.Connection,
+    municipios: list[str],
+) -> list[dict]:
+    """Mensajes de Telegram de los municipios elegidos (rango de fechas).
+
+    Replica el criterio de la web (deploy/api/mensajes_telegram.php): por cada
+    municipio toma el rango de fechas de sus medios (MIN/MAX timestamp_utc) y
+    trae los mensajes de Telegram dentro de esa ventana. Excluye los mensajes
+    del sistema (es_sistema=1).
+
+    Args:
+        conn: conexión SQLite a la DB de flujos.
+        municipios: municipios elegidos por el visitante (filtros del loop).
+
+    Returns:
+        Lista de dicts con id, from_name, texto, hora (local), fecha, tipo,
+        fotos (JSON de media_ids) y municipio, ordenados por fecha UTC.
+    """
+    if not municipios:
+        return []
+    limpiados = [str(m).strip() for m in municipios if m and str(m).strip()]
+    if not limpiados:
+        return []
+
+    marcadores = ",".join("?" * len(limpiados))
+    filas = conn.execute(f"""
+        SELECT municipio, MIN(timestamp_utc) AS desde, MAX(timestamp_utc) AS hasta
+        FROM media
+        WHERE municipio IN ({marcadores}) AND timestamp_utc IS NOT NULL
+        GROUP BY municipio
+    """, limpiados).fetchall()
+
+    mensajes: list[dict] = []
+    for municipio, desde, hasta in filas:
+        if not desde or not hasta:
+            continue
+        ventana_desde = str(desde)[:10] + "T00:00:00Z"
+        ventana_hasta = str(hasta)[:10] + "T23:59:59Z"
+        filas_msg = conn.execute("""
+            SELECT id, from_name, text, date_utc, message_type
+            FROM telegram_messages
+            WHERE es_sistema = 0 AND date_utc >= ? AND date_utc <= ?
+            ORDER BY date_utc
+        """, (ventana_desde, ventana_hasta)).fetchall()
+        for fila in filas_msg:
+            texto = str(fila[2] or "")
+            if len(texto) > MAX_TEXTO_TELEGRAM:
+                texto = texto[:MAX_TEXTO_TELEGRAM]
+            mensajes.append({
+                "id": int(fila[0]),
+                "from_name": str(fila[1] or ""),
+                "texto": texto,
+                "hora": _hora_local_mensaje(fila[3]),
+                "fecha": str(fila[3])[:10] if fila[3] else "",
+                "tipo": str(fila[4] or ""),
+                "fotos": [],  # se completa abajo
+                "municipio": str(municipio),
+                "_date_utc": str(fila[3] or ""),
+            })
+
+    if not mensajes:
+        return []
+
+    # Fotos: media_ids de telegram_media (media_type='photo') por mensaje.
+    ids = [m["id"] for m in mensajes]
+    marcadores_ids = ",".join("?" * len(ids))
+    fotos_por_msg: dict[int, list[int]] = {}
+    for mid, media_id in conn.execute(f"""
+        SELECT message_id, media_id FROM telegram_media
+        WHERE media_type = 'photo' AND media_id IS NOT NULL
+          AND message_id IN ({marcadores_ids})
+        ORDER BY message_id, media_order
+    """, ids).fetchall():
+        fotos_por_msg.setdefault(int(mid), []).append(int(media_id))
+
+    for m in mensajes:
+        m["fotos"] = json.dumps(fotos_por_msg.get(m["id"], []))
+
+    # Orden estable por fecha UTC (igual que la web: el chat sigue el día).
+    mensajes.sort(key=lambda m: (m["_date_utc"], m["id"]))
+    for m in mensajes:
+        m.pop("_date_utc", None)
+    return mensajes
+
+
 def _procesar_rafaga(
     db_path: str,
     selecciones: dict[str, list[str]],
@@ -209,15 +340,17 @@ def _procesar_rafaga(
     spec_salida: str,
     host: str = OSC_HOST,
     enviar_medios: bool = True,
+    enviar_telegram: bool = True,
 ) -> Optional[str]:
     """
     Genera el spec del loop con loop_db.generar_loop, lo escribe a archivo y
     lo envía por OSC al puerto 9002 (canal separado para el resultado).
 
 Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
-      1. `/flujos/fluir/resumen <total> <loop_secs> <image> <video> <audio> <text> <video360>`
+      1. `/flujos/fluir/resumen <total> <loop_secs> <image> <video> <audio> <text> <video360> <telegram>`
          — resumen con conteos por tipo (de `spec['resumen']`, salvo video/
-         video360 que salen de la separación por es_360).
+         video360 que salen de la separación por es_360; `telegram` es el
+         conteo de mensajes del chat, 0 si no hay municipios elegidos).
       2. `/flujos/fluir/filtro <clave> <valor>` — uno por filtro puesto por el
          usuario (hora_inicio, hora_fin, horas_elegidas, municipios, colores,
          tags, dias, clima). El callbacks los escribe como filas [clave, valor]
@@ -234,10 +367,15 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
          (titulo_seccion + texto_completo) para que TD lo visualice (la ruta
          .md que viaja en `/medio` no sirve para mostrar el texto).
       4. `/flujos/fluir/chiche <hora> <texto>` — uno por chiche ambiental.
-      5. `/flujos/fluir/fin <total>` — marca de finalización.
-      6. La spec completa se escribe a `spec_salida` (TD puede leerla).
+      5. `/flujos/fluir/mensaje <id> <from_name> <texto> <hora> <fecha> <tipo> <fotos> <municipio>`
+         — uno por mensaje de Telegram del chat, SOLO si el visitante eligió
+         municipio(s). Cada mensaje lleva su hora local (UTC-3) para que TD lo
+         sincronice con la hora que corre en el loop (mismo criterio que la web).
+      6. `/flujos/fluir/fin <total>` — marca de finalización.
+      7. La spec completa se escribe a `spec_salida` (TD puede leerla).
 
     Con `enviar_medios` False solo se envían resumen + fin (sin tabla/medio/chiche).
+    Con `enviar_telegram` False se omite el bloque de mensajes de Telegram.
 
     Args:
         db_path: ruta a la base de datos.
@@ -246,6 +384,7 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
         spec_salida: ruta del archivo JSON donde se vuelca el spec.
         host: host de TD para el cliente OSC de salida.
         enviar_medios: si se envían los mensajes tabla/medio/chiche (default True).
+        enviar_telegram: si se envían los mensajes de Telegram (default True).
 
     Returns:
         Ruta del spec escrita, o None si no se pudo generar.
@@ -285,6 +424,20 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
     # fluir_videos y los 360 a fluir_videos_360 en la emisión por 9002.
     videos_normales, videos_360 = _separar_videos_360(por_tipo)
 
+    # Mensajes de Telegram del chat: solo si el visitante eligió municipio(s).
+    # Acompañan al loop (cada uno con su hora local), no son medios del arco.
+    mensajes_telegram: list[dict] = []
+    if enviar_telegram and (filtros.get("municipios") or []):
+        conn = abrir(db_path)
+        try:
+            mensajes_telegram = _consultar_mensajes_telegram(
+                conn, filtros["municipios"])
+        finally:
+            conn.close()
+        log.info("   Telegram: %d mensajes del chat (municipios: %s)",
+                 len(mensajes_telegram),
+                 ", ".join(filtros["municipios"]) or "-")
+
     cli = udp_client.SimpleUDPClient(host, OSC_PUERTO_TD_RESULTADO)
     enviar(cli, f"{OSC_ADDR_FLUIR}/resumen",
            n_total,
@@ -293,7 +446,8 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
            len(videos_normales),
            resumen.get("audio", 0),
            resumen.get("text", 0),
-           len(videos_360))
+           len(videos_360),
+           len(mensajes_telegram))
 
     # Filtros puestos por el usuario: se reflejan en fluir_estado para que el
     # estado del loop muestre qué eligió el visitante (hora inicio/fin y
@@ -368,12 +522,24 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
             enviar(cli, f"{OSC_ADDR_FLUIR}/chiche",
                    hora_chiche, chich.get("texto", ""))
 
+    if enviar_telegram and mensajes_telegram:
+        # Bloque del chat: /tabla telegram + un /mensaje por mensaje. El
+        # callbacks de TD lo escribe en fluir_telegram (no cuenta en los
+        # recibidos/esperados del /fin, que validan medios del loop).
+        enviar(cli, f"{OSC_ADDR_FLUIR}/tabla", "telegram", len(mensajes_telegram))
+        for m in mensajes_telegram:
+            enviar(cli, f"{OSC_ADDR_FLUIR}/mensaje",
+                   m["id"], m["from_name"], m["texto"], m["hora"],
+                   m["fecha"], m["tipo"], m["fotos"], m["municipio"])
+
     enviar(cli, f"{OSC_ADDR_FLUIR}/fin", n_total)
     detalle = f"{n_total} medios"
     if enviar_medios:
         detalle += f" + {n_chiches} chiches"
     else:
         detalle += " (modo resumen+fin, sin tabla/medio/chiche)"
+    if mensajes_telegram:
+        detalle += f" + {len(mensajes_telegram)} mensajes de Telegram"
     log.info("  Enviado por 9002: %s.", detalle)
     return ruta_spec
 
@@ -386,6 +552,7 @@ def modo_fluir(
     una_vez: bool = False,
     host: str = OSC_HOST,
     enviar_medios: bool = True,
+    enviar_telegram: bool = True,
 ) -> None:
     """
     Modo "Fluir": escucha la ráfaga de selección de TD, la acumula por grupo,
@@ -406,6 +573,8 @@ def modo_fluir(
         host: host de TD.
         enviar_medios: si se envían los mensajes tabla/medio/chiche por 9002
             (False → solo resumen + fin).
+        enviar_telegram: si se envían los mensajes de Telegram del chat por 9002
+            (solo cuando hay municipios elegidos; False → sin bloque /mensaje).
     """
     selecciones: dict[str, list[str]] = {}
     ultimo_mensaje = time.monotonic()
@@ -449,6 +618,7 @@ def modo_fluir(
                     spec_salida,
                     host,
                     enviar_medios=enviar_medios,
+                    enviar_telegram=enviar_telegram,
                 )
                 selecciones.clear()
                 if una_vez:
@@ -479,13 +649,14 @@ Ejemplos:
   python scripts/td/puente_td.py fluir                # escucha continua (Enter para detener)
   python scripts/td/puente_td.py fluir --una-vez --debounce 1.0  # 1 ráfaga y sale
   python scripts/td/puente_td.py fluir --no-enviar-medios        # solo resumen + fin
+  python scripts/td/puente_td.py fluir --no-enviar-telegram      # sin mensajes de Telegram
 
 Probar "fluir" sin TouchDesigner (3 terminales):
 
   T1 (escucha 1 ráfaga y sale):
     python scripts/td/puente_td.py fluir --una-vez --debounce 1.0
-  T2 (ráfaga falsa — 2 horas = rango):
-    python -c "from pythonosc import udp_client as c; cl=c.SimpleUDPClient('127.0.0.1',9001); msgs=[('/flujos/seleccion/horas','06:00'),('/flujos/seleccion/horas','13:00')]; [cl.send_message(a,v) for a,v in msgs]"
+  T2 (ráfaga falsa — 2 horas + municipio = rango + chat):
+    python -c "from pythonosc import udp_client as c; cl=c.SimpleUDPClient('127.0.0.1',9001); msgs=[('/flujos/seleccion/horas','06:00'),('/flujos/seleccion/horas','13:00'),('/flujos/seleccion/municipios','Bell Ville')]; [cl.send_message(a,v) for a,v in msgs]"
   T3 (ver retorno por 9002):
     python scripts/td/osc_probe.py 9002 15
         """,
@@ -516,6 +687,11 @@ Probar "fluir" sin TouchDesigner (3 terminales):
                         help="Enviar por 9002 los mensajes tabla/medio/chiche "
                              "(default: True). Con --no-enviar-medios solo van "
                              "resumen + fin.")
+    parser.add_argument("--enviar-telegram", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Enviar por 9002 los mensajes de Telegram del chat "
+                             "(default: True, solo si hay municipios elegidos). "
+                             "Con --no-enviar-telegram se omite el bloque /mensaje.")
     parser.add_argument("--host", default=OSC_HOST,
                         help=f"Host TD (default: {OSC_HOST})")
     parser.add_argument("--port", type=int, default=OSC_PUERTO_TD,
@@ -545,6 +721,7 @@ Probar "fluir" sin TouchDesigner (3 terminales):
             una_vez=args.una_vez,
             host=args.host,
             enviar_medios=args.enviar_medios,
+            enviar_telegram=args.enviar_telegram,
         )
 
     return 0

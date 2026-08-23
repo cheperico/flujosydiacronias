@@ -7,6 +7,33 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 35] — 2026-08-23
+
+### Añadido
+- **GUI "Fluir" en Python** (`gui_fluir.py`, raíz del proyecto): reemplaza la UI de chips de TouchDesigner y el listener del "Fluir". Muestra la lista completa de seleccionables cargada desde la BD (horas 24 · municipios 74 · colores 10 · tags 200), permite marcar con checkboxes multi-columna y al hacer "Consultar y enviar por 9002" delega en `puente_td._procesar_rafaga` → `loop_db.generar_loop` y emite el contrato completo por OSC 9002. TD queda reducido a escuchar el 9002 (9000/9001 ya no hacen falta para este gesto). Features de UI: scroll interno por pestaña (Canvas + scrollbar + rueda del mouse), filtro de búsqueda en vivo (municipios/tags, insensible a acentos/mayúsculas), contadores por pestaña + total global (`trace_add`), Todo/Nada por grupo, frecuencias discretas por item (`tag (23)`), textos truncados con `…`, envío en hilo (UI no se congela, botón deshabilitado) y resumen post-envío leyendo `td/spec_fluir.json`. La selección sobrevive al filtrado (las `BooleanVar` viven fuera de los widgets). Doc: `docs/gui_fluir.md`.
+
+### Corregido
+- **Tags del selector**: ahora son las **200 con más apariciones** ordenadas luego alfabéticamente (`sorted(contador.items(), key=-freq)[:200]` → sort por `_clave_alfabetica`). Antes eran las 200 primeras alfabéticas del universo total (~1143 únicas) y la lista "se quedaba en la C".
+- **Ruta de import en `gui_fluir.py`**: calculaba la raíz subiendo 3 niveles (patrón de `scripts/td/`) desde un script que vive en la raíz → apuntaba afuera del proyecto, `import loop_db` fallaba en silencio dentro del hilo y no salía nada por 9002. Ahora 1 nivel + `sys.path` explícito (`scripts/td`, `scripts/ai_media`).
+- **Doble disparo eliminado**: la versión previa heredó debounce + Timer + polling del listener; dos caminos podían procesar la misma ráfaga. Con la GUI como origen el disparo es directo (sin ráfaga ni debounce).
+
+### Documentación
+- **`docs/gui_fluir.md`** (nuevo): arquitectura, carga de datos (queries + fix de tags), features de UI, delegación del contrato 9002, uso, verificación completa y decisiones/lecciones.
+- **AGENTS.md**: `gui_fluir.py` agregado a estructura, catálogo de scripts y tabla de documentos.
+
+---
+
+## [Entrega 34] — 2026-08-18
+
+### Añadido
+- **Chat de Telegram en el retorno "Fluir"** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat` + `td/crear_tablas_fluir.dat`): nueva tabla `fluir_telegram` en TD con el chat de los municipios elegidos por el visitante. El puente (modo `fluir`) consulta los mensajes con el **mismo criterio que la web** (`deploy/api/mensajes_telegram.php`): rango de fechas de los medios del municipio (`MIN/MAX timestamp_utc`), `es_sistema=0`, hora local UTC−3 (igual que `app.js`), texto truncado a 250 chars y `fotos` como JSON de media_ids. Emite el bloque `/tabla telegram <n>` + `/mensaje <id> <from_name> <texto> <hora> <fecha> <tipo> <fotos> <municipio>` ×N tras los chiches y antes del `/fin`; el resumen gana el 8º arg `telegram` (compatible hacia atrás: el callbacks lo lee con default 0). Flag CLI `--no-enviar-telegram`. El callbacks escribe `fluir_telegram` con header `[id, from_name, texto, hora, fecha, tipo, fotos, municipio]` y la limpia al inicio de lote. **No cuenta en los `recibidos/esperados` del `/fin`** (valida medios del loop, no el chat). Solo se envía si hay municipios elegidos (criterio web).
+
+### Documentación
+- **`docs/retorno_fluir_td.md`**: contrato §1 y diagrama §0 con el mensaje `/mensaje` y el 8º arg del resumen; espejo §3.2 byte-idéntico al `.dat` actualizado; §4/§8 con la tabla `fluir_telegram`; decisión nº 13; §3.1 router de 8 addresses.
+- **AGENTS.md**: bullet del retorno "Fluir" con `fluir_telegram` (8 tablas).
+
+---
+
 ## [Entrega 33] — 2026-08-18
 
 Registra trabajo ya commiteado (2026-08-17) que quedó sin entrada en el changelog.
