@@ -284,6 +284,7 @@ El modo `replace` vía `_preguntar_modo()` (flujos.py) crea backup automático e
 3. **webcolors**: las variantes "grey" (inglés británico: `dimgrey`, `slategrey`, etc.) existen en CSS3 y hay que mapearlas explícitamente.
 4. **CRLF en Windows**: Git muestra warnings de "LF will be replaced by CRLF". Es normal en Windows, no afecta la ejecución.
 5. **Ollama timeout**: las llamadas a modelos de visión pueden tardar 30-60s por imagen. Usar timeout=120s (180s en `ollama_client.py`).
+6. **Colores casi neutros (sat < 0.15)**: el matching CSS puede etiquetar grises/blancos/negros como colores (lavanda→violeta, gris puro→verde, near-white→azul) por match directo a colores pálidos o por el sesgo anti-gris. La puerta de neutralidad en `color_utils.get_color_names()` (`UMBRAL_SATURACION_NEUTRO = 0.15`) los clasifica por luminancia (`negro`/`blanco`/`gris`). Al regenerar colores (`improve_db --step colors --mode replace`), re-sync `deploy/db/visualizacion.db` (columnas `color_*`).
 
 ---
 

@@ -264,6 +264,8 @@ for basic_name, css_names in BASIC_COLORS.items():
 # Categorías "no-color": colores que queremos evitar si hay una alternativa real
 _CATEGORIAS_NO_COLOR = {"gris", "negro", "blanco"}
 
+UMBRAL_SATURACION_NEUTRO = 0.15  # por debajo: el color se trata como neutro (gris/blanco/negro)
+
 # -----------------------------------------------------------------------
 # Funciones principales
 # -----------------------------------------------------------------------
@@ -331,6 +333,10 @@ def closest_css_color(hex_color: str) -> str:
     # que esté dentro de 1.5× de la distancia mínima
     cat_closest = _CSS_TO_BASIC.get(closest, "gris")
     if cat_closest in _CATEGORIAS_NO_COLOR:
+        # Guard defensivo: si la entrada ya es casi neutra, no promocionar
+        # a un color real; devolver el gris/negro/blanco más cercano tal cual.
+        if _saturacion_hsv(r, g, b) < UMBRAL_SATURACION_NEUTRO:
+            return closest
         mejor_color = None
         mejor_dist = float("inf")
         for css_hex, css_name in CSS3_HEX_TO_NAMES.items():
@@ -349,19 +355,41 @@ def closest_css_color(hex_color: str) -> str:
     return closest
 
 
+def _nombre_neutro(r: int, g: int, b: int) -> tuple[str, str]:
+    """Nombre para colores casi neutros (saturacion < umbral): negro/blanco/gris por luminancia."""
+    if max(r, g, b) < 45:
+        return "negro", "negro"
+    if min(r, g, b) > 200:
+        return "blanco", "blanco"
+    # gris: el CSS gris mas cercano por redmean
+    mejor: str | None = None
+    mejor_dist = float("inf")
+    for css_hex, css_name in CSS3_HEX_TO_NAMES.items():
+        if _CSS_TO_BASIC.get(css_name, "gris") != "gris":
+            continue
+        cr, cg, cb = hex_to_rgb(css_hex)
+        d = _redmean(r, g, b, cr, cg, cb)
+        if d < mejor_dist:
+            mejor_dist, mejor = d, css_name
+    css_es = CSS_COLORS_ES.get(mejor, mejor or "gris")
+    return css_es, "gris"
+
+
 def get_color_names(hex_color: str) -> tuple:
     """
     Devuelve (nombre_css_es, nombre_basico) para un color hex.
+
+    Si la saturación HSV del color está por debajo de UMBRAL_SATURACION_NEUTRO,
+    se trata como neutro (negro/blanco/gris según luminancia) y NO se hace el
+    matching CSS: evita que píxeles casi grises de fotos B&N caigan en
+    categorías "coloreadas" (violeta, verde, azul, rosa) por el sesgo anti-gris.
     """
-    # Encontrar el nombre CSS en inglés más cercano
+    r, g, b = hex_to_rgb(hex_color)
+    if _saturacion_hsv(r, g, b) < UMBRAL_SATURACION_NEUTRO:
+        return _nombre_neutro(r, g, b)
     css_name_en = closest_css_color(hex_color)
-
-    # Traducir a español
     css_name_es = CSS_COLORS_ES.get(css_name_en, css_name_en)
-
-    # Encontrar color básico
     basic_name = _CSS_TO_BASIC.get(css_name_en, "gris")
-
     return css_name_es, basic_name
 
 

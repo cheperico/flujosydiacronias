@@ -146,6 +146,11 @@ Registra trabajo ya commiteado (2026-08-14/16) que quedó sin entrada en el chan
 
 ---
 
+## [Entrega 31] — 2026-08-24
+
+### Corregido
+- **Colores casi neutros ya no se etiquetan como colores** (`scripts/color_utils.py`): el naming mapeaba grises/blancos/negros (saturación < 0.15) a categorías coloreadas por dos vías: (a) match directo a colores CSS pálidos (lavanda, cardo, azure → violeta/azul) y (b) el sesgo anti-gris de `closest_css_color` promovía grises puros a "colores reales" a ≤1.5× de distancia sin mirar la saturación del píxel (un gris `#565656` → "verde"). Nueva **puerta de neutralidad** en `get_color_names()`: si sat < `UMBRAL_SATURACION_NEUTRO` (0.15) → clasifica por luminancia como `negro`/`blanco`/`gris` (con el CSS gris más cercano), sin pasar por el matching CSS. Blindaje defensivo en el sesgo anti-gris de `closest_css_color()`. Síntoma reportado: una foto blanco y negro aparecía bajo el filtro "violeta" de la web (`color_2 = #e8e8e9 → lavanda`). Datos regenerados: `improve_db --step colors --mode replace` (1048 imágenes, 0 errores) + sync de `deploy/db/visualizacion.db` (66 medios con algo violeta vs 67 antes; la foto B/N ya no matchea). Colores con tinte real (atardeceres azul-violeta, sat ≥ 0.15) conservan su clasificación.
+
 ## [Entrega 30] — 2026-08-14
 
 ### Añadido
