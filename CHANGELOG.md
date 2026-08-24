@@ -7,6 +7,63 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 38] — 2026-08-17
+
+### Añadido
+- **Modo de generación en `mapas_municipio.py`**: nuevo flag `--mode skip|update` (default `update`). `update` regenera todos los mapas (comportamiento previo); `skip` solo genera los archivos que faltan en disco (los existentes se saltan, contados como `saltados`). El `--dry-run` en modo `skip` marca los archivos que ya existen con `[skip]`. En la TUI (Visualizaciones→Mapas→Mapas por municipio) se pregunta `?Generar solo los que faltan? (S/n)` con **default Sí** (modo `skip`), y las preguntas de variantes ahora tienen **default Sí** (`S/n`).
+
+### Cambiado
+- **Ruta de los mapas desde el track GPX** (`scripts/mapa_ruta.py` + `scripts/mapas_municipio.py`): la línea de ruta ya NO se dibuja con los GPS embebidos de los medios (que mayormente son `inferido_tiempo`/`track_gps`, derivados del track), sino con el **track GPX real** registrado en `tracks` (`Al_FaB_Tucuman.gpx`, 3920 puntos).
+  - `mapa_ruta.py`: la PolyLine principal usa los 3920 puntos del track; los medios quedan como marcadores con su GPS propio. `--road-colors` colorea los segmentos del track por pendiente (calculada de la altitud del track). **Heatmap eliminado** (decisión del usuario).
+  - `mapas_municipio.py`: las variantes `ruta`/`gradiente` usan el **tramo del track** cuyo tiempo cae dentro del rango `[min, max]` de timestamps de los medios del municipio; `contexto` usa el track completo en gris. Los medios quedan como marcadores.
+- **Nuevo helper compartido `scripts/track_gpx.py`**: `cargar_tracks` (relee los .gpx de `tracks`), `puntos_track_con_tiempo`, `interpolar_posicion`, `tramo_temporal`, `distancia_haversine` (metros), `medir_discrepancias`/`reportar_discrepancias`. Envuelve la lógica que ya existía en `ubicar_videos_gpx.py`/`keypoints_contexto.py`.
+- **Reporte de discrepancias media vs track**: ambos scripts ganan el flag `--tolerancia-metros` (default 1000). Compara el GPS embebido de los medios (`geolocation_source IN metadata/manual`) contra la posición interpolada del track en su timestamp; si la distancia supera la tolerancia, lo reporta en el log (solo reporte, no escribe DB). Con la DB actual: 10 discrepancias >1000 m (fotos de Colón, Bell Ville y Río Hondo — 2.2 a 2.6 km).
+- **TUI**: `opcion_mapa` actualizada (sin heatmap, con `--tolerancia-metros`).
+
+### Documentación
+- **AGENTS.md**: `track_gpx.py` en estructura y catálogo; `mapa_ruta.py` agregado al catálogo (antes solo en estructura); descripciones de mapas actualizadas al track.
+- **README.md**: `track_gpx.py` en tabla y estructura; descripciones de mapas actualizadas.
+- **ROADMAP.md**: entrada en el historial.
+
+---
+
+## [Entrega 37] — 2026-08-18
+
+### Añadido
+- **Rutas de mapas por municipio en el retorno "Fluir"** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat` + `td/crear_tablas_fluir.dat`): nueva tabla `fluir_mapas` en TD (`[municipio, ruta]`). Cuando el visitante elige municipio(s), el puente emite `/flujos/fluir/mapa <municipio> <ruta>` × municipios, con la ruta relativa al mapa HTML generado por `scripts/mapas_municipio.py`. La ruta coincide **exactamente** con `_nombre_archivo` del generador para la variante configurada (`VARIANTE_MAPA_MUNICIPIO`, default `ruta`): `mapas/mapa_municipio_<municipio>_<variante>.html` (espacios→`_`, acentos conservados). **El HTML no viaja por OSC** (evita el límite de tamaño del mensaje); TD guarda la ruta en `fluir_mapas` y decide cómo renderizarla (p. ej. Web Render TOP). Flag CLI `--no-enviar-mapas`. El callbacks la limpia al inicio de lote y **no cuenta en los `recibidos/esperados` del `/fin`** (valida medios del loop). Fase 2 pendiente: capas extra al mapa (marcadores por tags/colores), Web Render Source=DAT editable, sync con el loop.
+
+### Cambiado
+- **TUI Visualizaciones reestructurada**: nueva opción 1 "Mapas" que agrupa en un submenú "Mapa de ruta" y "Mapas por municipio"; el menú queda: 1 Mapas, 2 Exportar visualización web (deploy), 3 TouchDesigner (puente OSC). Árbol del README sincronizado (faltaba listar "Mapas por municipio") y columnas TUI del catálogo en AGENTS.md actualizadas.
+
+### Documentación
+- **`docs/retorno_fluir_td.md`**: contrato §1 y diagrama §0 con el mensaje `/mapa`; espejo §3.2 byte-idéntico al `.dat` actualizado; §4/§8 con `fluir_mapas`; decisión nº 14 (fase 1: solo ruta); §3.1 router de 9 addresses.
+- **AGENTS.md**: bullet del retorno "Fluir" con `fluir_mapas` (9 tablas) + fila de `puente_td.py`.
+- **README.md**: fila de `scripts/td/puente_td.py`.
+
+---
+
+## [Entrega 36] — 2026-08-17
+
+### Añadido
+- **Mapas por municipio** (`scripts/mapas_municipio.py`): genera un mapa HTML por cada municipio recorrido (74 municipios), con 4 variantes:
+  - `ruta`: puntos del municipio + línea que los conecta
+  - `puntos`: solo los marcadores del municipio
+  - `contexto`: puntos destacados sobre la ruta completa (gris)
+  - `gradiente`: segmentos coloreados por pendiente + leyenda
+  - Nombre de archivo: `mapa_municipio_<municipio>_<variante>.html` (espacios→`_`, conserva acentos: `mapa_municipio_Melincué_ruta.html`). Salida en `mapas/`.
+  - Reutiliza helpers de `mapa_ruta.py` (Folium, `_crear_popup`, `color_segun_gradiente`, leyenda de gradiente) para consistencia visual.
+  - CLI: `flujos.py mapa-municipios` (alias `mapas`), args `--variantes`, `--municipio` (substring), `--output`, `--db`, `--dry-run`.
+  - TUI: Visualizaciones→2 (menú reordenado: 1 Mapa de ruta, 2 Mapas por municipio, 3 Exportar visualización, 4 TouchDesigner).
+  - Diseñado extensible para futuros tipos de mapa (feature "generar diferentes mapas").
+  - Verificado: 74 municipios × 4 variantes = 296 archivos, 0 errores (~16 s).
+
+### Documentación
+- **AGENTS.md**: `mapas_municipio.py` en estructura y catálogo; numeración de Visualizaciones corregida (exportar→3, puente→4, osc_probe→4).
+- **ROADMAP.md**: entrada en el historial (2026-08-17).
+- **README.md**: `mapas_municipio.py` en tabla de scripts y estructura.
+
+---
+
 ## [Entrega 35] — 2026-08-23
 
 ### Añadido

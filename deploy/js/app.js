@@ -14,7 +14,9 @@
         { nombre: 'amarillo', hex: '#fbc02d' },
         { nombre: 'rojo',     hex: '#d32f2f' },
         { nombre: 'rosa',     hex: '#e91e63' },
-        { nombre: 'violeta',  hex: '#7b1fa2' }
+        { nombre: 'violeta',  hex: '#7b1fa2' },
+        { nombre: 'blanco',   hex: '#f5f5f5' },
+        { nombre: 'naranja',  hex: '#f57c00' }
     ];
     var coloresSeleccionados = [];
 
@@ -75,6 +77,16 @@
         intervaloMs: 8000  // 8 segundos entre imágenes
     };
 
+    // Rotador de videos: reproduce UN video (muted) y al terminar pasa al
+    // siguiente. Tope por video para no colgarse en videos largos.
+    var VIDEO_ROTADOR = {
+        items: [],
+        index: 0,
+        cont: null,
+        timer: null,
+        maxMs: 45000  // ~45s por video
+    };
+
     var VENTANA_CHAT = {
         tamano: 10,
         inicio: 0,
@@ -108,7 +120,7 @@
 
     var BLOQUES = [];
     var BLOQUES_TEMPLATE = [
-        { id: 'colores',     tipo: 'selector', titulo: 'Colores',     w: 500, h: 220 },
+        { id: 'colores',     tipo: 'selector', titulo: 'Colores',     w: 300, h: 140 },
         { id: 'horas',       tipo: 'selector', titulo: 'Horas',       w: 550, h: 260 },
         { id: 'provincias',  tipo: 'selector', titulo: 'Provincias',  w: 350, h: 160 },
         { id: 'municipios',  tipo: 'selector', titulo: 'Municipios',  w: 520, h: 480 },
@@ -304,8 +316,12 @@
 
     function colocarBloques() {
         // ── TODOS los bloques en UNA zona compacta y centrada (más peso al centro).
-        // Empaqueta en filas anchas → poca altura, mancha densa, no vertical.
-        var anchoMax = 1300;
+        // Empaqueta en filas anchas → poca altura, mancha densa, horizontal.
+        // El ancho de fila se deriva del área total: si la mancha quedara vertical
+        // (ratio < 4:3) se amplía el ancho para "acostarla" (rango 4:3 a 8:5).
+        var area = 0;
+        BLOQUES.forEach(function(b) { area += b.w * b.h; });
+        var anchoMax = Math.round(Math.sqrt(area * 1.5));
         var ids = shuffle(
             ['imagenes', 'videos', 'textos', 'sonidos', 'mapa', 'comunicacion',
              'colores', 'horas', 'provincias', 'municipios', 'tags']
@@ -539,8 +555,23 @@
             });
             html += '</div>';
             cont.innerHTML = html;
+        } else if (tipo === 'video') {
+            // Videos: reproduce UN video muteado; al terminar pasa al siguiente.
+            if (VIDEO_ROTADOR.timer) { clearTimeout(VIDEO_ROTADOR.timer); VIDEO_ROTADOR.timer = null; }
+            VIDEO_ROTADOR.items = items.slice();
+            VIDEO_ROTADOR.index = 0;
+            VIDEO_ROTADOR.cont = cont;
+            var html = '<div style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#000">'
+                     + '<video id="video-actual" muted autoplay playsinline preload="metadata"'
+                     + ' style="width:100%;height:100%;object-fit:contain"></video>'
+                     + '<div class="slide-counter" style="position:absolute;top:.3rem;right:.4rem;font-size:.45rem;opacity:.5;background:rgba(0,0,0,.35);padding:.05rem .3rem;border-radius:2px;pointer-events:none">1/' + items.length + '</div>'
+                     + '</div>';
+            cont.innerHTML = html;
+            var vid = document.getElementById('video-actual');
+            if (vid) vid.addEventListener('ended', avanzarVideo);
+            cargarVideoActual();
         } else {
-            // Otros (texto, video): lista simple
+            // Otros (texto): lista simple
             var html = '<div style="display:flex;flex-direction:column;gap:.15rem;width:100%">';
             items.forEach(function(item) {
                 var desc = item.descripcion || item.archivo || '';
@@ -550,6 +581,29 @@
             html += '</div>';
             cont.innerHTML = html;
         }
+    }
+
+    // Carga el video actual del rotador y programa el tope de duración.
+    function cargarVideoActual() {
+        var vid = document.getElementById('video-actual');
+        if (!vid || !VIDEO_ROTADOR.items.length) return;
+        if (VIDEO_ROTADOR.timer) { clearTimeout(VIDEO_ROTADOR.timer); VIDEO_ROTADOR.timer = null; }
+        var item = VIDEO_ROTADOR.items[VIDEO_ROTADOR.index];
+        vid.muted = true;
+        vid.src = 'api/servir_medio.php?id=' + item.id;
+        vid.load();
+        vid.play().catch(function() {});
+        var counter = document.querySelector('#bloque-videos .slide-counter');
+        if (counter) counter.textContent = (VIDEO_ROTADOR.index + 1) + '/' + VIDEO_ROTADOR.items.length;
+        // Tope: si el video dura más que maxMs, avanzar igual.
+        VIDEO_ROTADOR.timer = setTimeout(avanzarVideo, VIDEO_ROTADOR.maxMs);
+    }
+
+    function avanzarVideo() {
+        if (!VIDEO_ROTADOR.items.length) return;
+        if (VIDEO_ROTADOR.timer) { clearTimeout(VIDEO_ROTADOR.timer); VIDEO_ROTADOR.timer = null; }
+        VIDEO_ROTADOR.index = (VIDEO_ROTADOR.index + 1) % VIDEO_ROTADOR.items.length;
+        cargarVideoActual();
     }
 
     // ═══════════════════════════════════════════════════════
@@ -780,7 +834,10 @@
                   + '</button>';
         });
         html += '</div>';
-        html += '<span class="info-filtro" id="info-colores">Todos</span>';
+        html += '<div style="display:flex;align-items:center;gap:.3rem;width:100%;flex-shrink:0">'
+              + '<span class="info-filtro" id="info-colores" style="margin-left:0">Todos</span>'
+              + '<button type="button" class="chip-limpiar" data-accion="limpiar-colores" title="Desmarcar todos">\u2715</button>'
+              + '</div>';
         cont.innerHTML = html;
         // Bind events
         cont.querySelectorAll('[data-accion="toggle-color"]').forEach(function(btn) {
@@ -788,6 +845,8 @@
                 toggleColor(this.dataset.valor);
             });
         });
+        var btnLimpiar = cont.querySelector('[data-accion="limpiar-colores"]');
+        if (btnLimpiar) btnLimpiar.addEventListener('click', function() { limpiarSeleccion('colores'); });
         actualizarInfoColores();
     }
 
@@ -800,7 +859,6 @@
             if (btn.dataset.valor === nombre) btn.classList.toggle('activo');
         });
         actualizarInfoColores();
-        cargarMediosFiltrados();
     }
 
     function actualizarInfoColores() {
@@ -809,6 +867,26 @@
         if (coloresSeleccionados.length === 0) info.textContent = 'Todos';
         else if (coloresSeleccionados.length === 1) info.textContent = coloresSeleccionados[0];
         else info.textContent = coloresSeleccionados.length + ' colores';
+    }
+
+    // Desmarca todos los chips de un bloque selector.
+    function limpiarSeleccion(grupo) {
+        if (grupo === 'colores') coloresSeleccionados = [];
+        else if (grupo === 'horas') horasSeleccionadas = [];
+        else if (grupo === 'provincias') {
+            provinciasSeleccionadas = [];
+            municipiosSeleccionados = [];   // cascada: sin provincias, sin municipios
+        }
+        else if (grupo === 'municipios') municipiosSeleccionados = [];
+        else if (grupo === 'tags') tagsSeleccionados = [];
+
+        rerenderBloque(grupo);
+        if (grupo === 'provincias') rerenderBloque('municipios');
+        if (grupo === 'horas') {
+            // Volver la paleta a un valor neutral (mediodía)
+            horaActual = 12;
+            paletaTarget = interpolar(horaActual);
+        }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -827,13 +905,18 @@
                   + '</button>';
         });
         html += '</div>';
-        html += '<span class="info-filtro" id="info-horas">Ninguna</span>';
+        html += '<div style="display:flex;align-items:center;gap:.3rem;width:100%;flex-shrink:0">'
+              + '<span class="info-filtro" id="info-horas" style="margin-left:0">Ninguna</span>'
+              + '<button type="button" class="chip-limpiar" data-accion="limpiar-horas" title="Desmarcar todos">\u2715</button>'
+              + '</div>';
         cont.innerHTML = html;
         cont.querySelectorAll('[data-accion="toggle-hora"]').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 toggleHora(parseInt(this.dataset.valor));
             });
         });
+        var btnLimpiar = cont.querySelector('[data-accion="limpiar-horas"]');
+        if (btnLimpiar) btnLimpiar.addEventListener('click', function() { limpiarSeleccion('horas'); });
         actualizarInfoHoras();
     }
 
@@ -853,7 +936,6 @@
         actualizarInfoHoras();
         // Transicionar paleta
         paletaTarget = interpolar(horaActual);
-        cargarMediosFiltrados();
     }
 
     function actualizarInfoHoras() {
@@ -882,13 +964,18 @@
                   + '</button>';
         });
         html += '</div>';
-        html += '<span class="info-filtro" id="info-provincias">Todas</span>';
+        html += '<div style="display:flex;align-items:center;gap:.3rem;width:100%;flex-shrink:0">'
+              + '<span class="info-filtro" id="info-provincias" style="margin-left:0">Todas</span>'
+              + '<button type="button" class="chip-limpiar" data-accion="limpiar-provincias" title="Desmarcar todos">\u2715</button>'
+              + '</div>';
         cont.innerHTML = html;
         cont.querySelectorAll('[data-accion="toggle-provincia"]').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 toggleProvincia(this.dataset.valor);
             });
         });
+        var btnLimpiar = cont.querySelector('[data-accion="limpiar-provincias"]');
+        if (btnLimpiar) btnLimpiar.addEventListener('click', function() { limpiarSeleccion('provincias'); });
         actualizarInfoProvincias();
     }
 
@@ -924,7 +1011,6 @@
         actualizarInfoProvincias();
         // Reflejar los municipios marcados/desmarcados en su bloque.
         rerenderBloque('municipios');
-        cargarMediosFiltrados();
     }
 
     function actualizarInfoProvincias() {
@@ -948,13 +1034,18 @@
                   + '</button>';
         });
         html += '</div>';
-        html += '<span class="info-filtro" id="info-municipios">Todos</span>';
+        html += '<div style="display:flex;align-items:center;gap:.3rem;width:100%;flex-shrink:0">'
+              + '<span class="info-filtro" id="info-municipios" style="margin-left:0">Todos</span>'
+              + '<button type="button" class="chip-limpiar" data-accion="limpiar-municipios" title="Desmarcar todos">\u2715</button>'
+              + '</div>';
         cont.innerHTML = html;
         cont.querySelectorAll('[data-accion="toggle-municipio"]').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 toggleMunicipio(this.dataset.valor);
             });
         });
+        var btnLimpiar = cont.querySelector('[data-accion="limpiar-municipios"]');
+        if (btnLimpiar) btnLimpiar.addEventListener('click', function() { limpiarSeleccion('municipios'); });
         actualizarInfoMunicipios();
     }
 
@@ -966,7 +1057,6 @@
             if (btn.dataset.valor === nombre) btn.classList.toggle('activo');
         });
         actualizarInfoMunicipios();
-        cargarMediosFiltrados();
     }
 
     function actualizarInfoMunicipios() {
@@ -994,25 +1084,30 @@
             cont.innerHTML = '<div style="font-size:.5rem;opacity:.4;padding:.3rem">Sin datos</div>';
             return;
         }
-        var html = '<div class="tag-cloud" style="display:flex;flex-wrap:wrap;gap:.2rem .25rem;justify-content:stretch;align-content:stretch;align-items:stretch;flex:1;min-height:0;padding:.2rem">';
+        var html = '<div class="tag-cloud" style="display:flex;flex-wrap:wrap;gap:.12rem .2rem;justify-content:flex-start;align-content:flex-start;align-items:center;flex:1;min-height:0;padding:.15rem">';
         tags.forEach(function(t) {
             var activo = tagsSeleccionados.indexOf(t.tag) !== -1 ? ' activo' : '';
             // Todas las etiquetas con el MISMO tamaño (sin tamaño por peso/cantidad);
             // el CSS (.tag-item flex:1) las estira para llenar el cuadro que les toca.
             html += '<button type="button" class="tag-item chip' + activo + '"'
                   + ' data-accion="toggle-tag" data-valor="' + t.tag + '"'
-                  + ' style="font-size:.6rem;opacity:.85;cursor:pointer;font-family:inherit;letter-spacing:.02em;line-height:1.2;padding:.1rem .2rem">'
+                  + ' style="font-size:.55rem;opacity:.85;cursor:pointer;font-family:inherit;letter-spacing:.02em;line-height:1.2;padding:.08rem .15rem">'
                   + t.tag
                   + '</button>';
         });
         html += '</div>';
-        html += '<span class="info-filtro" id="info-tags">Ninguno</span>';
+        html += '<div style="display:flex;align-items:center;gap:.3rem;width:100%;flex-shrink:0">'
+              + '<span class="info-filtro" id="info-tags" style="margin-left:0">Ninguno</span>'
+              + '<button type="button" class="chip-limpiar" data-accion="limpiar-tags" title="Desmarcar todos">\u2715</button>'
+              + '</div>';
         cont.innerHTML = html;
         cont.querySelectorAll('[data-accion="toggle-tag"]').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 toggleTag(this.dataset.valor);
             });
         });
+        var btnLimpiar = cont.querySelector('[data-accion="limpiar-tags"]');
+        if (btnLimpiar) btnLimpiar.addEventListener('click', function() { limpiarSeleccion('tags'); });
         actualizarInfoTags();
     }
 
@@ -1024,7 +1119,6 @@
             if (btn.dataset.valor === nombre) btn.classList.toggle('activo');
         });
         actualizarInfoTags();
-        cargarMediosFiltrados();
     }
 
     function actualizarInfoTags() {
@@ -1242,8 +1336,11 @@
     function actualizarFlow() {
         var elapsed = Date.now() - FLOW.inicio;
         if (elapsed >= FLOW.duracionMs) {
-            detenerFlow();
-            return;
+            // LOOP INFINITO: termina un ciclo de duracionMs y arranca otro.
+            // Solo "Detener" lo corta.
+            FLOW.inicio = Date.now();
+            reiniciarSlideshow();      // vuelve a la imagen 0 + ultimoAvance = 0
+            elapsed = 0;
         }
 
         // Autoplay de sonidos sincronizado con el tiempo del fluir
@@ -1552,7 +1649,7 @@
             })
             .then(function() {
                 // Cargar tags reales desde la API
-                return fetch('api/tags.php?limite=40')
+                return fetch('api/tags.php?limite=80')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (data && data.tags && data.tags.length) {
@@ -1624,6 +1721,12 @@
     BLOQUES_TEMPLATE.forEach(function(t) {
         var fw = 0.7 + Math.random() * 0.6; // ±30%
         var fh = 0.7 + Math.random() * 0.6;
+        if (t.id === 'tags') {
+            // El cuadro de tags es denso (hasta 80): no permitir que se
+            // encoja tanto que las etiquetas desborden sin scrollbar.
+            fw = Math.max(fw, 0.85);
+            fh = Math.max(fh, 0.85);
+        }
         BLOQUES.push({
             id: t.id, tipo: t.tipo, titulo: t.titulo,
             w: Math.round(t.w * escala * fw),

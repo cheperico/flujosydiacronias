@@ -105,8 +105,13 @@ COMANDOS:
                     Ej: python flujos.py keypoints-contexto --dry-run
 
   mapa              Generar un mapa HTML interactivo con Folium
-                    a partir de los GPS de la BD.
-                    Ej: python flujos.py mapa --heatmap --road-colors
+                    a partir del track GPX y los GPS de la BD.
+                    Ej: python flujos.py mapa --road-colors
+
+  mapa-municipios   Genera un mapa HTML por municipio recorrido, con variantes
+                    (ruta, puntos, contexto, gradiente). Nombre:
+                    mapa_municipio_<municipio>_<variante>.html
+                    Ej: python flujos.py mapa-municipios --variantes ruta,puntos
 
   export-csv        Exporta todas las tablas de la DB a archivos CSV.
                     Ej: python flujos.py export-csv
@@ -1884,14 +1889,22 @@ def tui():
     }, db_path=leer_db(), pre_titulo=_cabecera, etiqueta_salir="Salir", on_salir=_chau)
 
 
-# ── Mapa de ruta (Folium) ─────────────────────────────────────────────────────
+# ── Visualizaciones ───────────────────────────────────────────────────────────
 
 def opcion_visualizaciones(db_path: str | None = None):
     """Menu: visualizaciones de la ruta y los datos (mapas, deploy web, TD...)."""
     _menu("VISUALIZACIONES", {
-        "1": ("Mapa de ruta (Folium)", lambda db: opcion_mapa()),
+        "1": ("Mapas", opcion_mapas),
         "2": ("Exportar visualización web (deploy)", opcion_exportar_visualizacion),
         "3": ("TouchDesigner (puente OSC)", opcion_touchdesigner),
+    }, db_path)
+
+
+def opcion_mapas(db_path: str | None = None):
+    """Menu: mapas de la ruta y los municipios (Folium)."""
+    _menu("MAPAS", {
+        "1": ("Mapa de ruta (Folium)", lambda db: opcion_mapa()),
+        "2": ("Mapas por municipio (Folium)", opcion_mapas_municipio),
     }, db_path)
 
 
@@ -2071,26 +2084,27 @@ def opcion_mapa():
     """Menu para generar mapa HTML interactivo con Folium."""
     limpiar_pantalla()
     print("=== MAPA DE RUTA (Folium) ===\n")
-    print("  Genera un mapa HTML interactivo con los puntos GPS de la BD.\n")
-    print("  El mapa se guarda como archivo HTML en el directorio actual")
+    print("  Genera un mapa HTML interactivo desde el track GPX y los GPS de la BD.\n")
+    print("  La ruta principal se dibuja con el track GPX; los medios quedan como\n")
+    print("  marcadores. Se reportan discrepancias media vs track (tolerancia 1000 m).\n")
+    print("  El mapa se guarda como archivo HTML en el directorio actual\n")
     print("  (o en la ruta que se indique).\n")
     print("  Opciones:")
     print("    --output PATH  Ruta de salida (default: mapa_ruta.html)")
     print("    --no-markers   Sin marcadores en los puntos")
-    print("    --heatmap      Agregar capa de mapa de calor")
     print("    --road-colors  Colorear segmentos por pendiente")
-
+    print("    --tolerancia-metros N  Tolerancia para reportar discrepancias (default 1000)")
 
 
     output = input("  Archivo de salida [mapas/mapa_ruta.html]: ").strip() or "mapas/mapa_ruta.html"
-    heatmap = _preguntar_sn("Incluir mapa de calor")
     road_colors = _preguntar_sn("Colorear segmentos por pendiente")
     no_markers = _preguntar_sn("Omitir marcadores")
+    tolerancia = input("  Tolerancia de discrepancias en metros [1000]: ").strip()
     custom_db = input(f"  ?Usar otra DB? (default: {leer_db()}) [Enter para default]: ").strip()
 
-    print(f"\n  Resumen: output={output}  heatmap={'SI' if heatmap else 'NO'}  "
-          f"road_colors={'SI' if road_colors else 'NO'}  "
-          f"no_markers={'SI' if no_markers else 'NO'}")
+    print(f"\n  Resumen: output={output}  road_colors={'SI' if road_colors else 'NO'}  "
+          f"no_markers={'SI' if no_markers else 'NO'}  "
+          f"tolerancia={tolerancia or 1000}m")
     if not _preguntar_sn("Generar mapa"):
         print("  Cancelado.")
         pausa()
@@ -2101,13 +2115,69 @@ def opcion_mapa():
     from scripts import mapa_ruta
     args = ["--output", output]
     _args_sn(args, [
-        (heatmap, "--heatmap"),
         (road_colors, "--road-colors"),
         (no_markers, "--no-markers"),
     ])
+    if tolerancia.strip():
+        args.extend(["--tolerancia-metros", tolerancia.strip()])
     if custom_db:
         args.extend(["--db", custom_db])
     mapa_ruta.main(args)
+
+    pausa()
+
+
+# ── Mapas por municipio ───────────────────────────────────────────────────────
+
+def opcion_mapas_municipio(db_path: str | None = None):
+    """Menu para generar un mapa HTML por municipio recorrido, con variantes."""
+    limpiar_pantalla()
+    print("=== MAPAS POR MUNICIPIO (Folium) ===\n")
+    print("  Genera un mapa HTML por cada municipio recorrido, con variantes.\n")
+    print("  Cada archivo sigue la lógica: mapa_municipio_<municipio>_<variante>.html\n")
+    print("  Variantes:")
+    print("    ruta       Puntos del municipio + línea que los conecta")
+    print("    puntos     Solo los marcadores del municipio, sin línea")
+    print("    contexto   Puntos destacados sobre la ruta completa")
+    print("    gradiente  Segmentos coloreados por pendiente\n")
+
+    output = input("  Carpeta de salida [mapas]: ").strip() or "mapas"
+    solo_faltantes = _preguntar_sn("Generar solo los que faltan", default=True)
+    mode = "skip" if solo_faltantes else "update"
+
+    variantes = []
+    for var, desc in (
+        ("ruta", "Puntos + ruta"),
+        ("puntos", "Solo puntos"),
+        ("contexto", "Puntos + contexto ruta completa"),
+        ("gradiente", "Puntos + gradiente"),
+    ):
+        if _preguntar_sn(f"Incluir variante '{var}' ({desc})", default=True):
+            variantes.append(var)
+    if not variantes:
+        print("  Debes elegir al menos una variante.")
+        pausa()
+        return
+
+    municipio = input("  Filtrar por municipio (Enter = todos): ").strip()
+    custom_db = input(f"  ?Usar otra DB? (default: {leer_db()}) [Enter para default]: ").strip()
+
+    print(f"\n  Resumen: output={output}  modo={'solo faltantes' if mode == 'skip' else 'todos'}  "
+          f"variantes={','.join(variantes)}  municipio={municipio or 'TODOS'}")
+    if not _preguntar_sn("Generar mapas"):
+        print("  Cancelado.")
+        pausa()
+        return
+
+    print("\n  Generando mapas...\n")
+
+    from scripts import mapas_municipio
+    args = ["--output", output, "--mode", mode, "--variantes", ",".join(variantes)]
+    if municipio:
+        args.extend(["--municipio", municipio])
+    if custom_db:
+        args.extend(["--db", custom_db])
+    mapas_municipio.main(args)
 
     pausa()
 
@@ -2570,6 +2640,10 @@ def main():
     elif comando == "mapa":
         from scripts import mapa_ruta
         mapa_ruta.main(resto)
+
+    elif comando in ("mapa-municipios", "mapas"):
+        from scripts import mapas_municipio
+        mapas_municipio.main(resto)
 
     elif comando in ("export-csv", "csv"):
         from scripts import exportar_csv

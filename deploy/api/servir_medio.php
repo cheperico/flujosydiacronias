@@ -9,7 +9,7 @@ $pdo = db();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($id <= 0) { http_response_code(400); echo "ID invalido"; exit; }
 
-$stmt = $pdo->prepare("SELECT ruta_absoluta, tipo FROM medios WHERE id = ?");
+$stmt = $pdo->prepare("SELECT ruta_absoluta, tipo, carpeta, archivo FROM medios WHERE id = ?");
 $stmt->execute([$id]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -19,30 +19,45 @@ if (!$row || !$row['ruta_absoluta']) {
     exit;
 }
 
-$path = $row['ruta_absoluta'];
+// Raíces contra las que resolver rutas (los archivos viven en media/ del deploy).
+$raices = [
+    getenv('FLUJOS_ROOT') ? rtrim(getenv('FLUJOS_ROOT'), '/\\') : null,
+    __DIR__ . '/..',      // raíz del sitio web (deploy/media/ junto al resto)
+    __DIR__ . '/../..',   // raíz del proyecto Flujos (DBs viejas con n\telegram\...)
+];
 
-// Fallback: DBs viejas guardan rutas relativas a la raíz del proyecto Flujos
-// (ej: 'n\telegram\audio_1.ogg'). file_exists() las buscaría en el cwd del
-// servidor web y fallaría. Resolver contra FLUJOS_ROOT (variable de entorno
-// o .htaccess) o contra la raíz de esta instalación web.
-if (!file_exists($path)) {
-    $rel = $path;
-    $raices = [
-        getenv('FLUJOS_ROOT') ? rtrim(getenv('FLUJOS_ROOT'), '/\\') : null,
-        __DIR__ . '/..',      // raíz del sitio web (media/ del deploy junto al resto)
-        __DIR__ . '/../..',   // raíz del proyecto Flujos (DBs viejas con n\telegram\...)
-    ];
+function _flujos_segmento($s) {
+    // Normaliza separadores a '/' y quita slashes/spacios al inicio y fin.
+    return str_replace('\\', '/', trim((string)$s, "/\\ \t\n\r\0\x0B"));
+}
+
+// Candidatas a la ruta real:
+//  1) la ruta guardada en la DB (absoluta Windows en snapshots --snapshot-local,
+//     web-relativa 'media/...' en snapshots de deploy),
+//  2) web-relativa media/<carpeta>/<archivo>: siempre que el deploy haya copiado
+//     los medios a media/, funciona en hosting aunque la DB guarde rutas locales.
+$candidatas = [];
+if ($row['ruta_absoluta'] !== null && $row['ruta_absoluta'] !== '') {
+    $candidatas[] = _flujos_segmento($row['ruta_absoluta']);
+}
+$carpeta = _flujos_segmento($row['carpeta']);
+$archivo = str_replace('\\', '/', (string)$row['archivo']);
+if ($archivo !== '') {
+    $candidatas[] = 'media/' . ($carpeta !== '' ? $carpeta . '/' : '') . $archivo;
+}
+
+$path = null;
+foreach ($candidatas as $cand) {
+    if ($cand === '') continue;
+    if (file_exists($cand)) { $path = $cand; break; }
     foreach ($raices as $raiz) {
         if (!$raiz) continue;
-        $candidata = $raiz . DIRECTORY_SEPARATOR . $rel;
-        if (file_exists($candidata)) {
-            $path = $candidata;
-            break;
-        }
+        $chk = $raiz . '/' . ltrim($cand, '/');
+        if (file_exists($chk)) { $path = $chk; break 2; }
     }
 }
 
-if (!file_exists($path)) {
+if ($path === null) {
     http_response_code(404);
     echo "Archivo no existe en disco";
     exit;

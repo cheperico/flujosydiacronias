@@ -1,7 +1,7 @@
 # =============================================================================
 # crear_tablas_fluir.dat — Auto-creación de las tablas del "Fluir" (Table DAT)
 #
-# Crea las 8 tablas que espera `td/fluir_callbacks.dat` (receptor OSC 9002):
+# Crea las 9 tablas que espera `td/fluir_callbacks.dat` (receptor OSC 9002):
 #     fluir_estado   [clave, valor]
 #     fluir_fotos    [media_id, ruta, keypoint, hora, tipo]
 #     fluir_videos   [media_id, ruta, keypoint, hora, tipo]
@@ -10,11 +10,12 @@
 #     fluir_textos   [media_id, ruta, keypoint, hora, tipo, titulo, texto]
 #     fluir_chiches  [hora, texto]
 #     fluir_telegram [id, from_name, texto, hora, fecha, tipo, fotos, municipio]
+#     fluir_mapas    [municipio, ruta]
 #
 # Los headers son EXACTOS a los que escribe fluir_callbacks.dat
 # (HEADER_MEDIO para las tablas de medios, HEADER_TEXTO para fluir_textos,
-# HEADER_TELEGRAM para fluir_telegram, ["clave","valor"], ["hora","texto"]).
-# No cambiarlos.
+# HEADER_TELEGRAM para fluir_telegram, HEADER_MAPA para fluir_mapas,
+# ["clave","valor"], ["hora","texto"]). No cambiarlos.
 #
 # IDEMPOTENTE: si la tabla ya existe NO se pisa; solo se normaliza la fila 0
 # (header). Se puede volver a correr en un toe ya armado sin romper nada.
@@ -54,6 +55,7 @@ TABLAS = {
     "fluir_textos": ["media_id", "ruta", "keypoint", "hora", "tipo", "titulo", "texto"],
     "fluir_chiches": ["hora", "texto"],
     "fluir_telegram": ["id", "from_name", "texto", "hora", "fecha", "tipo", "fotos", "municipio"],
+    "fluir_mapas": ["municipio", "ruta"],
 }
 
 
@@ -94,7 +96,7 @@ def _normalizar_headers(tabla, header):
 
 
 def crear_tablas_fluir(padre=None):
-    """Crea las 7 tablas fluir_* si no existen y normaliza sus headers.
+    """Crea las 9 tablas fluir_* si no existen y normaliza sus headers.
 
     Idempotente: si la tabla ya existe no se borra ni se recrea; solo se
     asegura que su fila 0 tenga el header correcto. Devuelve una lista de

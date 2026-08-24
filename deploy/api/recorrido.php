@@ -18,40 +18,41 @@ $sql = "SELECT id, archivo, carpeta, tipo, ruta_relativa,
 $stmt = $pdo->query($sql);
 $puntos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// También devolvemos la lista de colores disponibles y su hex representativo
-// para armar los chips de selección
-$sqlColores = "SELECT color_1 AS nombre, color_1_hex AS hex
-               FROM medios WHERE color_1 IS NOT NULL
-               UNION
-               SELECT color_2, color_2_hex
-               FROM medios WHERE color_2 IS NOT NULL
-               UNION
-               SELECT color_3, color_3_hex
-               FROM medios WHERE color_3 IS NOT NULL";
+// Hex representativo por nombre (paleta canónica): el swatch del chip debe
+// coincidir con el nombre de la categoría. El hex dominante bruto de las fotos
+// suele ser oscuro/apagado y no coincide visualmente con el nombre (ej: "rosa"
+// → beige, "gris" → teal). Se usa la misma paleta Material del fallback en
+// js/app.js para que el chip se vea igual con y sin API.
+$HEX_CANONICO = [
+    'azul'     => '#1976d2',
+    'negro'    => '#212121',
+    'gris'     => '#757575',
+    'verde'    => '#388e3c',
+    'marrón'   => '#5d4037',
+    'amarillo' => '#fbc02d',
+    'rojo'     => '#d32f2f',
+    'rosa'     => '#e91e63',
+    'violeta'  => '#7b1fa2',
+    'blanco'   => '#f5f5f5',
+    'naranja'  => '#f57c00',
+];
+
+// Contar slots por nombre (color_1/2/3) para ordenar por frecuencia real
+$sqlColores = "SELECT nombre, COUNT(*) AS total FROM (
+                 SELECT color_1 AS nombre FROM medios WHERE color_1 IS NOT NULL
+                 UNION ALL
+                 SELECT color_2 FROM medios WHERE color_2 IS NOT NULL
+                 UNION ALL
+                 SELECT color_3 FROM medios WHERE color_3 IS NOT NULL
+               ) GROUP BY nombre";
 $stmtColores = $pdo->query($sqlColores);
-$filasColores = $stmtColores->fetchAll(PDO::FETCH_ASSOC);
-
-// Agrupar hexes por nombre de color
-$coloresAgrupados = [];
-foreach ($filasColores as $f) {
-    $nom = $f['nombre'];
-    $hex = $f['hex'];
-    if (!isset($coloresAgrupados[$nom])) {
-        $coloresAgrupados[$nom] = ['nombre' => $nom, 'hexes' => []];
-    }
-    $coloresAgrupados[$nom]['hexes'][] = $hex;
-}
-
-// Para cada color, elegir el hex más frecuente como representativo
 $coloresDisponibles = [];
-foreach ($coloresAgrupados as $nom => $info) {
-    $frecuencias = array_count_values($info['hexes']);
-    arsort($frecuencias);
-    $hexRep = array_key_first($frecuencias);
+foreach ($stmtColores->fetchAll(PDO::FETCH_ASSOC) as $f) {
+    $nom = $f['nombre'];
     $coloresDisponibles[] = [
         'nombre' => $nom,
-        'hex'    => $hexRep,
-        'total'  => count($info['hexes'])
+        'hex'    => $HEX_CANONICO[$nom] ?? '#607d8b',
+        'total'  => (int)$f['total']
     ];
 }
 // Ordenar por cantidad descendente

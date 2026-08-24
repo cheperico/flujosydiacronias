@@ -8,7 +8,9 @@ Modos:
                  acumula por grupo, detecta el fin, genera el spec del loop
                  con loop_db.generar_loop y lo envía por 9002 (medios por
                  tipo, chiches y, si hay municipios elegidos, los mensajes
-                 de Telegram del chat como bloque /mensaje → fluir_telegram)
+                 de Telegram del chat como bloque /mensaje → fluir_telegram
+                 y las rutas de mapas por municipio como bloque /mapa →
+                 fluir_mapas)
 
 Uso básico:
   python scripts/td/puente_td.py elecciones           # nubes de elecciones
@@ -333,6 +335,39 @@ def _consultar_mensajes_telegram(
     return mensajes
 
 
+# ── Mapas por municipio (ruta al HTML generado por mapas_municipio.py) ────────
+
+# Variante del mapa que se envía a TD. Las posibles viven en
+# `scripts/mapas_municipio.py` (VARIANTES): ruta, puntos, contexto, gradiente.
+# 'ruta' = puntos del municipio + línea que los conecta.
+VARIANTE_MAPA_MUNICIPIO = "ruta"
+
+# Plantilla de la ruta del mapa de cada municipio, consistente con el nombre de
+# archivo que genera `scripts/mapas_municipio.py` (`_nombre_archivo`):
+#   mapas/mapa_municipio_<municipio con espacios→_>_<variante>.html
+# El puente NO genera los mapas; solo construye la ruta del archivo (relativa a
+# la raíz del proyecto) que ya existe o que se espera que exista.
+PLANTILLA_MAPA_MUNICIPIO = "mapas/mapa_municipio_{slug}_{variante}.html"
+
+
+def _slug_municipio(nombre: str) -> str:
+    """Convierte el nombre de un municipio al formato usado en el archivo.
+
+    Igual que `mapas_municipio.py::_nombre_archivo`: reemplaza los espacios por
+    guion bajo y conserva los acentos (ej: 'Bell Ville' -> 'Bell_Ville',
+    'Río Hondo' -> 'Río_Hondo').
+    """
+    return str(nombre).strip().replace(" ", "_")
+
+
+def _ruta_mapa_municipio(nombre: str) -> str:
+    """Ruta (relativa a la raíz del proyecto) del mapa HTML de un municipio."""
+    return PLANTILLA_MAPA_MUNICIPIO.format(
+        slug=_slug_municipio(nombre),
+        variante=VARIANTE_MAPA_MUNICIPIO,
+    )
+
+
 def _procesar_rafaga(
     db_path: str,
     selecciones: dict[str, list[str]],
@@ -341,6 +376,7 @@ def _procesar_rafaga(
     host: str = OSC_HOST,
     enviar_medios: bool = True,
     enviar_telegram: bool = True,
+    enviar_mapas: bool = True,
 ) -> Optional[str]:
     """
     Genera el spec del loop con loop_db.generar_loop, lo escribe a archivo y
@@ -371,11 +407,16 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
          — uno por mensaje de Telegram del chat, SOLO si el visitante eligió
          municipio(s). Cada mensaje lleva su hora local (UTC-3) para que TD lo
          sincronice con la hora que corre en el loop (mismo criterio que la web).
-      6. `/flujos/fluir/fin <total>` — marca de finalización.
-      7. La spec completa se escribe a `spec_salida` (TD puede leerla).
+      6. `/flujos/fluir/mapa <municipio> <ruta>` — uno por municipio elegido,
+         SOLO si el visitante eligió municipio(s). `ruta` es la ruta relativa al
+         mapa HTML del municipio (generado por `scripts/mapas_municipio.py`,
+         variante 'ruta'); TD la guarda en `fluir_mapas` para renderizarla.
+      7. `/flujos/fluir/fin <total>` — marca de finalización.
+      8. La spec completa se escribe a `spec_salida` (TD puede leerla).
 
     Con `enviar_medios` False solo se envían resumen + fin (sin tabla/medio/chiche).
     Con `enviar_telegram` False se omite el bloque de mensajes de Telegram.
+    Con `enviar_mapas` False se omite el bloque de rutas de mapas.
 
     Args:
         db_path: ruta a la base de datos.
@@ -385,6 +426,7 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
         host: host de TD para el cliente OSC de salida.
         enviar_medios: si se envían los mensajes tabla/medio/chiche (default True).
         enviar_telegram: si se envían los mensajes de Telegram (default True).
+        enviar_mapas: si se envían las rutas de mapas por municipio (default True).
 
     Returns:
         Ruta del spec escrita, o None si no se pudo generar.
@@ -532,6 +574,16 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
                    m["id"], m["from_name"], m["texto"], m["hora"],
                    m["fecha"], m["tipo"], m["fotos"], m["municipio"])
 
+    if enviar_mapas and (filtros.get("municipios") or []):
+        # Bloque de mapas: un /mapa por municipio elegido, con la ruta al HTML
+        # (generado por scripts/mapas_municipio.py, variante 'ruta'). El
+        # callbacks de TD lo escribe en fluir_mapas [municipio, ruta].
+        municipios_unicos = list(dict.fromkeys(str(m) for m in filtros["municipios"]))
+        for nombre in municipios_unicos:
+            ruta_mapa = _ruta_mapa_municipio(nombre)
+            enviar(cli, f"{OSC_ADDR_FLUIR}/mapa", nombre, ruta_mapa)
+        log.info("   Mapas enviados por 9002: %d municipios", len(municipios_unicos))
+
     enviar(cli, f"{OSC_ADDR_FLUIR}/fin", n_total)
     detalle = f"{n_total} medios"
     if enviar_medios:
@@ -540,6 +592,8 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
         detalle += " (modo resumen+fin, sin tabla/medio/chiche)"
     if mensajes_telegram:
         detalle += f" + {len(mensajes_telegram)} mensajes de Telegram"
+    if enviar_mapas and (filtros.get("municipios") or []):
+        detalle += f" + {len(municipios_unicos)} mapas"
     log.info("  Enviado por 9002: %s.", detalle)
     return ruta_spec
 
@@ -553,6 +607,7 @@ def modo_fluir(
     host: str = OSC_HOST,
     enviar_medios: bool = True,
     enviar_telegram: bool = True,
+    enviar_mapas: bool = True,
 ) -> None:
     """
     Modo "Fluir": escucha la ráfaga de selección de TD, la acumula por grupo,
@@ -575,6 +630,8 @@ def modo_fluir(
             (False → solo resumen + fin).
         enviar_telegram: si se envían los mensajes de Telegram del chat por 9002
             (solo cuando hay municipios elegidos; False → sin bloque /mensaje).
+        enviar_mapas: si se envían las rutas de mapas por municipio por 9002
+            (solo cuando hay municipios elegidos; False → sin bloque /mapa).
     """
     selecciones: dict[str, list[str]] = {}
     ultimo_mensaje = time.monotonic()
@@ -619,6 +676,7 @@ def modo_fluir(
                     host,
                     enviar_medios=enviar_medios,
                     enviar_telegram=enviar_telegram,
+                    enviar_mapas=enviar_mapas,
                 )
                 selecciones.clear()
                 if una_vez:
@@ -650,6 +708,7 @@ Ejemplos:
   python scripts/td/puente_td.py fluir --una-vez --debounce 1.0  # 1 ráfaga y sale
   python scripts/td/puente_td.py fluir --no-enviar-medios        # solo resumen + fin
   python scripts/td/puente_td.py fluir --no-enviar-telegram      # sin mensajes de Telegram
+  python scripts/td/puente_td.py fluir --no-enviar-mapas         # sin rutas de mapas por municipio
 
 Probar "fluir" sin TouchDesigner (3 terminales):
 
@@ -692,6 +751,11 @@ Probar "fluir" sin TouchDesigner (3 terminales):
                         help="Enviar por 9002 los mensajes de Telegram del chat "
                              "(default: True, solo si hay municipios elegidos). "
                              "Con --no-enviar-telegram se omite el bloque /mensaje.")
+    parser.add_argument("--enviar-mapas", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Enviar por 9002 las rutas de mapas por municipio "
+                             "(default: True, solo si hay municipios elegidos). "
+                             "Con --no-enviar-mapas se omite el bloque /mapa.")
     parser.add_argument("--host", default=OSC_HOST,
                         help=f"Host TD (default: {OSC_HOST})")
     parser.add_argument("--port", type=int, default=OSC_PUERTO_TD,
@@ -722,6 +786,7 @@ Probar "fluir" sin TouchDesigner (3 terminales):
             host=args.host,
             enviar_medios=args.enviar_medios,
             enviar_telegram=args.enviar_telegram,
+            enviar_mapas=args.enviar_mapas,
         )
 
     return 0

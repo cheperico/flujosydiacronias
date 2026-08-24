@@ -76,6 +76,9 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
      `deploy/db/visualizacion.db` con rutas absolutas de Windows, **sin** copiar
      medios ni transcodificar. ⚠️ Al compartir archivo con el modo deploy, el
      último export gana — para subir a hosting usar siempre el modo deploy.
+     `servir_medio.php` resuelve como fallback `media/<carpeta>/<archivo>`, así
+     que el hosting funciona aunque la DB guarde rutas absolutas locales (el
+     fallback cubre imágenes, videos y audios).
 
 2. **Regenerar el spec del motor de loop** (en PowerShell forzar UTF-8 por
    caracteres de caja `─`):

@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-mapa_ruta.py — Genera un mapa HTML interactivo con Folium desde los GPS de la BD.
+mapa_ruta.py — Genera un mapa HTML interactivo con Folium desde el track GPX y los GPS de la BD.
 
-Lee los registros geolocalizados de la base de datos, dibuja la ruta en un mapa
-interactivo con marcadores informativos, y opcionalmente colorea los segmentos
-por pendiente y agrega una capa de calor.
+La línea de ruta principal se dibuja con el track GPX registrado en `tracks`
+(3920 puntos reales del recorrido); los medios geolocalizados quedan como
+marcadores con su GPS propio. Opcionalmente colorea los segmentos por pendiente
+(road-colors) y reporta discrepancias entre el GPS embebido de los medios y el
+track interpolado en su timestamp (con tolerancia configurable).
 
 Uso:
     python scripts/mapa_ruta.py                            # Genera mapas/mapa_ruta.html
     python scripts/mapa_ruta.py --output ruta.html          # Nombre de salida
     python scripts/mapa_ruta.py --no-markers                # Solo línea, sin marcadores
-    python scripts/mapa_ruta.py --heatmap                   # Incluir heatmap
     python scripts/mapa_ruta.py --road-colors               # Colorear segmentos por gradiente
+    python scripts/mapa_ruta.py --tolerancia-metros 2000    # Tolerancia de discrepancias
     python scripts/mapa_ruta.py --db ruta.db                # BD alternativa
 """
 
@@ -28,13 +30,21 @@ import sys
 
 try:
     import folium
-    from folium.plugins import HeatMap
 except ImportError:
     print("=" * 60)
     print("  ERROR: Folium no está instalado.")
     print("  Ejecutá:  pip install folium")
     print("=" * 60)
     sys.exit(1)
+
+# Permitir importar scripts hermanos desde la raíz del proyecto
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from scripts.track_gpx import cargar_tracks, medir_discrepancias, reportar_discrepancias  # noqa: E402
+from scripts.gradiente import haversine  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -171,18 +181,23 @@ def generar_mapa(
     db_path: str,
     output: str = "mapas/mapa_ruta.html",
     markers: bool = True,
-    heatmap: bool = False,
     road_colors: bool = False,
+    tolerancia_metros: int = 1000,
 ) -> str:
     """
     Genera un mapa HTML interactivo con Folium desde la base de datos.
+
+    La línea de ruta principal se dibuja con el track GPX registrado en `tracks`
+    (los puntos reales del track, más densos que los medios). Los medios quedan
+    como marcadores con su GPS propio. Si no hay track, la línea usa los medios.
 
     Args:
         db_path: Ruta a la base de datos SQLite.
         output: Ruta del archivo HTML de salida.
         markers: Si True, agrega marcadores con popups en cada punto GPS.
-        heatmap: Si True, agrega capa de mapa de calor.
         road_colors: Si True, colorea los segmentos de ruta según el gradiente.
+        tolerancia_metros: Tolerancia (m) para reportar discrepancias entre el
+            GPS embebido de los medios (metadata/manual) y el track interpolado.
     Returns:
         Ruta absoluta del archivo HTML generado, o None si no hay datos.
 
@@ -207,6 +222,19 @@ def generar_mapa(
             return None
 
         puntos = leer_puntos_gps(conn)
+        tracks = cargar_tracks(conn)
+        track_puntos: list[tuple] = []
+        if tracks:
+            track_puntos = tracks[0]["puntos_tiempo"]
+            log.info("Track usado para la ruta: %s (%d puntos)",
+                     tracks[0]["name"], len(track_puntos))
+        else:
+            log.warning("Sin track GPX: la ruta se dibuja con los GPS de los medios.")
+
+        # Reporte de discrepancias media vs track (solo si hay track)
+        discrepancias: list[dict] = []
+        if track_puntos:
+            discrepancias = medir_discrepancias(conn, track_puntos, tolerancia_metros)
 
     finally:
         conn.close()
@@ -219,9 +247,16 @@ def generar_mapa(
     log.info("Leídos %d puntos GPS desde la BD.", total)
     log.info("  Rango: %s → %s", puntos[0]["timestamp"], puntos[-1]["timestamp"])
 
-    # ---- Calcular centro y bounds ----
-    lats = [p["lat"] for p in puntos]
-    lons = [p["lon"] for p in puntos]
+    if discrepancias:
+        reportar_discrepancias(discrepancias, tolerancia_metros)
+
+    # ---- Calcular centro y bounds (prioriza el track, fallback medios) ----
+    if track_puntos:
+        lats = [p[1] for p in track_puntos]
+        lons = [p[2] for p in track_puntos]
+    else:
+        lats = [p["lat"] for p in puntos]
+        lons = [p["lon"] for p in puntos]
     centro_lat = sum(lats) / len(lats)
     centro_lon = sum(lons) / len(lons)
     bounds = [[min(lats), min(lons)], [max(lats), max(lons)]]
@@ -238,16 +273,17 @@ def generar_mapa(
     # Ajustar zoom para que cubra toda la ruta
     m.fit_bounds(bounds)
 
-    # ---- Agregar línea de ruta ----
-    if road_colors and total >= 2:
-        # Segmentos individuales con color según gradiente
+    # ---- Agregar línea de ruta (track o medios) ----
+    if road_colors and track_puntos:
+        _agregar_ruta_road_colors_track(m, track_puntos)
+    elif road_colors and not track_puntos and total >= 2:
+        # Fallback sin track: colorear segmentos entre medios
         for i in range(1, total):
             p_prev = puntos[i - 1]
             p_curr = puntos[i]
             color = color_segun_gradiente(p_curr["gradiente"])
             grad_str = formatear_pendiente(p_curr["gradiente"])
-
-            seg = folium.PolyLine(
+            folium.PolyLine(
                 locations=[(p_prev["lat"], p_prev["lon"]),
                            (p_curr["lat"], p_curr["lon"])],
                 color=color,
@@ -259,31 +295,32 @@ def generar_mapa(
                     f"<b>Distancia:</b> {formatear_distancia(p_curr['distancia_m'])}",
                     max_width=250,
                 ),
-            )
-            seg.add_to(m)
-
-        # Agregar leyenda de colores de gradiente
+            ).add_to(m)
         _agregar_leyenda_gradiente(m)
-
+    elif track_puntos:
+        # Línea del track en color fijo
+        coords = [(p[1], p[2]) for p in track_puntos]
+        folium.PolyLine(
+            locations=coords,
+            color=RUTA_COLOR,
+            weight=RUTA_WEIGHT,
+            opacity=RUTA_OPACITY,
+            tooltip=f"Track — {len(track_puntos)} puntos",
+        ).add_to(m)
     else:
-        # Línea única de color fijo
+        # Línea de medios en color fijo
         coords = [(p["lat"], p["lon"]) for p in puntos]
-        ruta = folium.PolyLine(
+        folium.PolyLine(
             locations=coords,
             color=RUTA_COLOR,
             weight=RUTA_WEIGHT,
             opacity=RUTA_OPACITY,
             tooltip=f"Ruta — {total} puntos | {formatear_distancia(puntos[-1].get('cumul_dist_m'))}",
-        )
-        ruta.add_to(m)
+        ).add_to(m)
 
-    # ---- Agregar marcadores ----
+    # ---- Agregar marcadores (medios) ----
     if markers:
         _agregar_marcadores(m, puntos)
-
-    # ---- Agregar heatmap ----
-    if heatmap:
-        _agregar_heatmap(m, puntos)
 
     # ---- Guardar ----
     output_abs = os.path.abspath(output)
@@ -300,6 +337,44 @@ def generar_mapa(
                  formatear_distancia(puntos[-1]["cumul_dist_m"]))
 
     return output_abs
+
+
+# ---------------------------------------------------------------------------
+# Ruta con road-colors sobre el track GPX
+# ---------------------------------------------------------------------------
+
+def _agregar_ruta_road_colors_track(mapa, track_puntos: list[tuple]):
+    """Colorea los segmentos del track por pendiente calculada de la altitud.
+
+    track_puntos: [(dt, lat, lon, ele)] ordenados por tiempo. La pendiente de
+    cada segmento se calcula como (ele2 - ele1) / distancia_haversine. Los
+    segmentos sin altitud en ambos extremos usan el color default.
+    """
+    for i in range(1, len(track_puntos)):
+        dt1, lat1, lon1, ele1 = track_puntos[i - 1]
+        dt2, lat2, lon2, ele2 = track_puntos[i]
+        grad = None
+        dist_m = None
+        if ele1 is not None and ele2 is not None:
+            dist_m = haversine(lat1, lon1, lat2, lon2)
+            if dist_m and dist_m > 0:
+                grad = ((ele2 - ele1) / dist_m) * 100.0
+        color = color_segun_gradiente(grad)
+        grad_str = formatear_pendiente(grad)
+        seg = folium.PolyLine(
+            locations=[(lat1, lon1), (lat2, lon2)],
+            color=color,
+            weight=RUTA_WEIGHT,
+            opacity=RUTA_OPACITY,
+            tooltip=f"{grad_str} | {dt2.isoformat()}",
+            popup=folium.Popup(
+                f"<b>Pendiente:</b> {grad_str}<br>"
+                f"<b>Distancia:</b> {formatear_distancia(dist_m)}",
+                max_width=250,
+            ),
+        )
+        seg.add_to(mapa)
+    _agregar_leyenda_gradiente(mapa)
 
 
 # ---------------------------------------------------------------------------
@@ -402,35 +477,6 @@ def _crear_popup(punto: dict, es_inicio: bool = False, es_fin: bool = False) -> 
 
 
 # ---------------------------------------------------------------------------
-# Heatmap
-# ---------------------------------------------------------------------------
-
-def _agregar_heatmap(mapa, puntos: list[dict]):
-    """Agrega una capa de mapa de calor basada en la densidad de puntos."""
-
-    # Preparar datos: [lat, lon, peso]
-    # Peso = intensidad relativa (1 por defecto, o basado en frecuencia)
-    heat_data = [[p["lat"], p["lon"], 1] for p in puntos]
-
-    HeatMap(
-        data=heat_data,
-        radius=15,
-        blur=10,
-        max_zoom=13,
-        min_opacity=0.3,
-        gradient={
-            0.3: "blue",
-            0.5: "lime",
-            0.7: "yellow",
-            0.9: "orange",
-            1.0: "red",
-        },
-    ).add_to(mapa)
-
-    log.info("Capa HeatMap agregada (%d puntos).", len(puntos))
-
-
-# ---------------------------------------------------------------------------
 # Leyenda de colores de gradiente (road-colors)
 # ---------------------------------------------------------------------------
 
@@ -499,9 +545,8 @@ Ejemplos:
   python scripts/mapa_ruta.py                                    # Mapa con marcadores
   python scripts/mapa_ruta.py --output docs/mapa_viaje.html      # Ruta de salida personalizada
   python scripts/mapa_ruta.py --no-markers                        # Solo línea, sin marcadores
-  python scripts/mapa_ruta.py --heatmap                           # Con capa de calor
   python scripts/mapa_ruta.py --road-colors                       # Segmentos coloreados por pendiente
-  python scripts/mapa_ruta.py --road-colors --heatmap             # Todo incluido
+  python scripts/mapa_ruta.py --tolerancia-metros 2000            # Tolerancia de discrepancias
   python scripts/mapa_ruta.py --db db/flujos.db                   # BD explícita
         """,
     )
@@ -521,14 +566,15 @@ Ejemplos:
         help="No agregar marcadores en los puntos GPS",
     )
     parser.add_argument(
-        "--heatmap",
-        action="store_true",
-        help="Agregar capa de mapa de calor (HeatMap)",
-    )
-    parser.add_argument(
         "--road-colors",
         action="store_true",
         help="Colorear segmentos de ruta según pendiente: verde=bajada, rojo=subida",
+    )
+    parser.add_argument(
+        "--tolerancia-metros",
+        type=int,
+        default=1000,
+        help="Tolerancia (m) para reportar discrepancias media vs track (default: 1000)",
     )
     args = parser.parse_args(argv)
 
@@ -552,8 +598,8 @@ Ejemplos:
         db_path=db_path,
         output=args.output,
         markers=not args.no_markers,
-        heatmap=args.heatmap,
         road_colors=args.road_colors,
+        tolerancia_metros=args.tolerancia_metros,
     )
 
     if resultado:
@@ -563,10 +609,10 @@ Ejemplos:
         log.info("  Abrílo en tu navegador para explorar la ruta.")
         log.info("")
         log.info("Opciones disponibles:")
-        log.info("  --no-markers    Sin marcadores")
-        log.info("  --heatmap       Con capa de calor")
-        log.info("  --road-colors   Segmentos coloreados por pendiente")
-        log.info("  --output PATH   Ruta de salida personalizada")
+        log.info("  --no-markers          Sin marcadores")
+        log.info("  --road-colors         Segmentos coloreados por pendiente")
+        log.info("  --tolerancia-metros N Tolerancia para reportar discrepancias (default 1000)")
+        log.info("  --output PATH         Ruta de salida personalizada")
     else:
         log.error("No se pudo generar el mapa.")
         sys.exit(1)

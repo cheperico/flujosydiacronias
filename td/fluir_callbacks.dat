@@ -24,6 +24,10 @@ El cerebro Python (`scripts/td/puente_td.py` modo 'fluir') envía por el puerto
         (0..N, solo si el visitante eligió municipio(s)) Un mensaje de Telegram del
         chat (es_sistema=0) dentro del rango de fechas de los municipios elegidos.
         Se guardan como filas en fluir_telegram.
+    /flujos/fluir/mapa <municipio> <ruta>
+        (0..N, solo si el visitante eligió municipio(s)) Ruta relativa al mapa HTML
+        del municipio (generado por scripts/mapas_municipio.py, variante 'ruta').
+        Se guardan como filas [municipio, ruta] en fluir_mapas.
     /flujos/fluir/fin   <total>           (fin de lote)
 
 keypoint = ubicación temporal del medio DENTRO del loop, en segundos sobre
@@ -47,6 +51,7 @@ titulo/texto para el contenido real del medio, ver abajo):
   fluir_textos  [media_id, ruta, keypoint, hora, tipo, titulo, texto]  <- text
   fluir_chiches [hora, texto]
   fluir_telegram [id, from_name, texto, hora, fecha, tipo, fotos, municipio]  <- telegram (chat)
+  fluir_mapas   [municipio, ruta]  <- mapa HTML del municipio (ruta relativa)
 
 Un único helper _tabla_para_tipo(tipo) resuelve el nombre de tabla correcto
 para cada tipo: image -> fluir_fotos, video -> fluir_videos, video360 ->
@@ -84,6 +89,11 @@ HEADER_TEXTO = ["media_id", "ruta", "keypoint", "hora", "tipo", "titulo", "texto
 # el mensaje /flujos/fluir/mensaje.
 HEADER_TELEGRAM = ["id", "from_name", "texto", "hora", "fecha", "tipo", "fotos", "municipio"]
 
+# Mapas por municipio: el puente envía la ruta relativa al mapa HTML de cada
+# municipio elegido (generado por scripts/mapas_municipio.py, variante 'ruta').
+# Se guardan como filas [municipio, ruta] en fluir_mapas; no son medios del loop.
+HEADER_MAPA = ["municipio", "ruta"]
+
 # Tipo anunciado por el último /tabla (contexto para logs y debug).
 _tipo_actual = None
 
@@ -116,6 +126,8 @@ def _enrutar(address, args):
         _recibir_chiche(args)
     elif address == OSC_ADDR_FLUIR + "/mensaje":
         _recibir_mensaje(args)
+    elif address == OSC_ADDR_FLUIR + "/mapa":
+        _recibir_mapa(args)
     elif address == OSC_ADDR_FLUIR + "/fin":
         _recibir_fin(args)
     else:
@@ -202,6 +214,9 @@ def _recibir_resumen(args):
     t_tg = _tabla("fluir_telegram")
     if t_tg is not None:
         _limpiar(t_tg, HEADER_TELEGRAM)
+    t_mapa = _tabla("fluir_mapas")
+    if t_mapa is not None:
+        _limpiar(t_mapa, HEADER_MAPA)
 
     print(f"{PREFIJO_LOG} Resumen: {total} medios (image={n_image}, "
           f"video={n_video}, video360={n_video360}, audio={n_audio}, text={n_text}), "
@@ -389,6 +404,39 @@ def _recibir_mensaje(args):
     tabla.appendRow([id_tg, from_name, texto, hora, fecha, tipo, fotos, municipio])
 
     print(f'{PREFIJO_LOG} Telegram: {id_tg} "{from_name}" ({municipio})')
+
+
+def _recibir_mapa(args):
+    """Guarda la ruta del mapa de un municipio en fluir_mapas.
+
+    El puente envía /flujos/fluir/mapa justo después del bloque telegram (solo
+    si el visitante eligió municipio(s)). Columnas HEADER_MAPA: [municipio, ruta].
+    La ruta es relativa al mapa HTML generado por scripts/mapas_municipio.py
+    (variante 'ruta'); TD la usa para renderizar el mapa del municipio.
+    """
+    if len(args) < 2:
+        print(f"{PREFIJO_LOG} Mensaje 'mapa' incompleto: {args}")
+        return
+
+    municipio = str(args[0] or "")
+    ruta = str(args[1] or "")
+    if not municipio:
+        print(f"{PREFIJO_LOG} 'mapa' sin municipio, ignorado: {args}")
+        return
+
+    tabla = _tabla("fluir_mapas")
+    if tabla is None:
+        return
+
+    # Seguridad: si la tabla quedó vacía (resumen perdido), escribir header.
+    if tabla.numRows == 0:
+        tabla.appendRow(list(HEADER_MAPA))
+    if tabla.numCols < 2:
+        _limpiar(tabla, HEADER_MAPA)
+
+    tabla.appendRow([municipio, ruta])
+
+    print(f'{PREFIJO_LOG} Mapa: {municipio} -> {ruta}')
 
 
 def _recibir_fin(args):

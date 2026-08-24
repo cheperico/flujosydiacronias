@@ -217,7 +217,10 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
   │  └─ 0. Volver
 
 6. Visualizaciones
-  ├─ 1. Mapa de ruta (Folium)
+  ├─ 1. Mapas
+  │   ├─ 1. Mapa de ruta (Folium)
+  │   └─ 2. Mapas por municipio (Folium)
+  │       └─ 0. Volver
   ├─ 2. Exportar visualización web (deploy)
       ├─ 1. Deploy a deploy/ (pregunta si transcodificar)
       ├─ 2. Deploy a otra carpeta (pregunta si transcodificar)
@@ -264,11 +267,13 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/astronomia.py` | Posición del sol (NOAA), clasificación twilight | Enriquecimiento |
 | `scripts/limpiar_tandas.py` | Selección de mejor imagen por tanda | Curación |
 | `scripts/mover_descartadas.py` | Mueve imágenes descartadas a carpeta excluir/ | Curación |
-| `scripts/td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD, 9002→TD resultado). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter; en `fluir`, si hay municipios elegidos, emite además el chat de Telegram a la tabla `fluir_telegram` (flag `--no-enviar-telegram`) | Instalación |
+| `scripts/td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD, 9002→TD resultado). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter; en `fluir`, si hay municipios elegidos, emite además el chat de Telegram a la tabla `fluir_telegram` y las rutas de mapas por municipio a `fluir_mapas` (flags `--no-enviar-telegram` / `--no-enviar-mapas`) | Instalación |
 | `scripts/td/elecciones.py` | Nubes de elecciones (horas, municipios, colores, tags, días, clima) → TD vía OSC | Instalación |
 | `scripts/td/osc_probe.py` | Eco OSC: escucha lo que llega a un puerto y lo imprime (test rápido TD→Python) | Instalación |
 | `scripts/td/util_enter.py` | Helper compartido: `detener_con_enter()` devuelve un `threading.Event` (salida limpia con Enter) | Instalación |
-| `scripts/mapa_ruta.py` | Mapa interactivo con Folium | Consulta |
+| `scripts/mapa_ruta.py` | Mapa interactivo con Folium: la línea usa el track GPX; los medios como marcadores. `--tolerancia-metros` reporta discrepancias media vs track | Visualización |
+| `scripts/mapas_municipio.py` | Un mapa HTML por municipio recorrido, con variantes (`ruta`, `puntos`, `contexto`, `gradiente`). La línea de `ruta`/`contexto`/`gradiente` usa el tramo del track GPX del municipio. `--mode skip` genera solo los faltantes; `--mode update` regenera todos. Nombre: `mapa_municipio_<municipio>_<variante>.html` | Visualización |
+| `scripts/track_gpx.py` | Helpers de tracks GPX: cargar, interpolar, tramo temporal, haversine, discrepancias media vs track | Visualización |
 | `scripts/check_db.py` | Inspección de la DB | Consulta |
 | `scripts/check_gps.py` | Verifica GPS en archivos via ExifTool | Consulta |
 | `scripts/check_db_data.py` | Stats de weather, dia_semana y geocode | Consulta |
@@ -771,7 +776,9 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 │   ├── color_utils.py         # Colores dominantes
 │   ├── limpiar_tandas.py      # Limpieza de tandas de fotografías
 │   ├── mover_descartadas.py   # Mover descartadas
-│   ├── mapa_ruta.py           # Mapa interactivo (Folium)
+│   ├── mapa_ruta.py           # Mapa interactivo (Folium, ruta desde track GPX)
+│   ├── mapas_municipio.py     # Mapas por municipio con variantes (Folium)
+│   ├── track_gpx.py           # Helpers de tracks GPX (interpolar, tramo, discrepancias)
 │   ├── check_db.py            # Inspección de DB
 │   ├── check_gps.py           # Verificación GPS
 │   ├── check_db_data.py       # Helper: clima, día, geocode

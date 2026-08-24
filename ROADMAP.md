@@ -184,6 +184,39 @@ Etapa 5: INSTALACIÓN          →  TouchDesigner + motor de deriva
     `elecciones.py`/`loop_db.py`/`puente_td.py`, y si el departamento reemplaza al municipio
     en las nubes de elecciones TD.
 
+- **2026-08-17:** **Mapas por municipio (`scripts/mapas_municipio.py`).**
+  - Nueva opción para generar diferentes mapas (extensible a otros tipos a futuro).
+    Por ahora genera **un mapa HTML por municipio recorrido** (74 municipios) con 4
+    variantes: `ruta` (puntos + línea), `puntos` (solo marcadores), `contexto`
+    (puntos destacados sobre la ruta completa en gris) y `gradiente` (segmentos
+    por pendiente + leyenda). Reutiliza helpers de `mapa_ruta.py` (Folium).
+  - Nombre de archivo: `mapa_municipio_<municipio>_<variante>.html` (espacios→`_`,
+    conserva acentos: `mapa_municipio_Melincué_ruta.html`). Salida en `mapas/`.
+  - CLI: `flujos.py mapa-municipios` (alias `mapas`); TUI: Visualizaciones→2.
+    Args: `--variantes`, `--municipio` (substring), `--output`, `--db`, `--dry-run`.
+  - Verificado: 74 municipios × 4 variantes = 296 archivos, 0 errores (~16 s).
+
+- **2026-08-17:** **Ruta de los mapas desde el track GPX + reporte de discrepancias.**
+  - Problema: `mapa_ruta.py` y `mapas_municipio.py` dibujaban la línea de ruta con los
+    GPS embebidos de los medios (mayormente `inferido_tiempo`/`track_gps`, derivados del
+    track). La fuente correcta de la ruta es el track GPX (`Al_FaB_Tucuman.gpx`, 3920 pts).
+  - Cambio: la línea de ruta de `mapa_ruta.py` usa el **track completo**; las variantes
+    `ruta`/`gradiente` de `mapas_municipio.py` usan el **tramo del track** por rango
+    temporal de los medios del municipio; `contexto` usa el track completo. Los medios
+    quedan como marcadores con su GPS propio. **Heatmap eliminado**.
+  - Nuevo helper `scripts/track_gpx.py` (cargar_tracks, interpolar_posicion, tramo_temporal,
+    haversine, medir_discrepancias/reportar_discrepancias). Envuelve la lógica ya existente
+    en `ubicar_videos_gpx.py`/`keypoints_contexto.py`.
+  - Reporte de discrepancias media vs track: flag `--tolerancia-metros` (default 1000) en
+    ambos scripts; compara GPS embebido (`metadata`/`manual`) contra el track interpolado
+    en el timestamp; solo reporta, no escribe DB. Con la DB actual: 10 discrepancias
+    >1000 m (2.2–2.6 km en Colón, Bell Ville, Río Hondo).
+  - Verificado: 296/296 mapas regenerados con tramos del track, 0 errores.
+  - Modo de generación: `mapas_municipio.py --mode skip|update` (default `update`); `skip`
+    genera solo los faltantes en disco (los existentes se saltan). En la TUI se pregunta
+    `?Generar solo los que faltan?` con default Sí, y las variantes se confirman con
+    default Sí (`S/n`).
+
 - **2026-08-16:** **Inferencia de hora de textos por interpolación en el track GPX.**
   - Los textos (`type='text'`) sin fecha solo obtienen su fecha/hora interpolando
     su posición (lat/lon) contra el track GPX (posición → tiempo): los 2 puntos
