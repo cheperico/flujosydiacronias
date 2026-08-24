@@ -618,11 +618,11 @@
       "origen": "db_seed"
     },
     "building": {
-      "es": "urbanismo",
-      "origen": "db_seed"
+      "es": "edificio",
+      "origen": "manual"
     },
     "buildings": {
-      "es": "urbanismo",
+      "es": "edificios",
       "origen": "manual"
     },
     "burro": {

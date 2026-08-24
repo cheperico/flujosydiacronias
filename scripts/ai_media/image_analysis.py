@@ -109,6 +109,8 @@ PREFIJOS_META_EN: tuple[str, ...] = (
     "to describe the image in detail, we",
     "to describe the image,",
     "to describe the image in detail,",
+    "to describe the image:",
+    "to describe the image in detail:",
     # Familia B — "Here's a ... description of the image:"
     "here's a long description of the image:",
     "here is a long description of the image:",

@@ -24,7 +24,7 @@ Uso:
     python scripts/ai_media/audio_tagging.py --mode update    # re-procesa todos
     python scripts/ai_media/audio_tagging.py --mode replace   # limpia y regenera
     python scripts/ai_media/audio_tagging.py --dry-run        # previsualiza sin escribir
-    python scripts/ai_media/audio_tagging.py --top-k 5        # 5 etiquetas por media
+    python scripts/ai_media/audio_tagging.py --top-k 5        # 5 etiquetas (default)
     python scripts/ai_media/audio_tagging.py --modelo <onnx>  # otro modelo onnx
     python scripts/ai_media/audio_tagging.py --no-descargar   # no auto-descargar el modelo
 
@@ -77,7 +77,7 @@ CLAVE_SALIDA = "ia_keywords_sonido"      # texto ES coma-separado
 CLAVE_RAW = "ia_sonido_raw"              # JSON con [{name, prob}]
 
 # Parámetros del modelo
-TOP_K_DEFAULT = 8            # etiquetas por media
+TOP_K_DEFAULT = 5            # etiquetas por media (plan_keywords.md etapa 3)
 NUM_THREADS_DEFAULT = 4      # hilos de CPU para onnxruntime
 VENTANA_SECS = 10            # duración de cada ventana de audio
 MAX_VENTANAS = 30            # máx ventanas procesadas (cubre 300 s de audio)
@@ -402,6 +402,37 @@ GLOSARIO: dict[str, str] = {
     "canidae": "cánidos", "mice": "ratones", "rats": "ratas", "rodents": "roedores",
     "housefly": "mosca", "mosquito": "mosquito", "birds": "pájaros", "fowl": "aves de corral",
     "animal": "animal",
+
+    # Clases AudioSet sin traducir detectadas en auditoría de la DB
+    # (docs/plan_keywords.md etapa 3, 2026-08). Incluye préstamos léxicos
+    # válidos en español (flamenco, tabla, mantra) mapeados como identidad
+    # para dejar explícito que no son fugas de inglés.
+    "eruption": "erupción", "steam": "vapor",
+    "steam whistle": "silbato de vapor", "wood": "madera",
+    "arrow": "flecha", "skateboard": "monopatín",
+    "clip-clop": "trote de caballo", "bow-wow": "ladrido", "yip": "ganido",
+    "whimper (dog)": "gemido",
+    "dove": "paloma",
+    "flap": "aleteo",
+    "plucked string instrument": "instrumento de cuerda pulsada",
+    "brass instrument": "instrumento de viento metal",
+    "wind instrument": "instrumento de viento",
+    "woodwind instrument": "instrumento de viento madera",
+    "steel guitar": "guitarra hawaiana", "slide guitar": "guitarra slide",
+    "strum": "rasgueo",
+    "electronic organ": "órgano electrónico", "hammond organ": "órgano hammond",
+    "chime": "carrillón", "tick-tock": "tic tac", "toot": "pitido",
+    "punk rock": "punk", "rock and roll": "rock and roll",
+    "soul music": "música soul", "gospel music": "música gospel",
+    "new-age music": "música new age", "flamenco": "flamenco",
+    "tabla": "tabla", "mantra": "mantra",
+    "crackle": "crujido", "sizzle": "siseo", "whoosh": "frufrú",
+    "burst": "estallido", "boing": "rebote", "scrape": "raspado",
+    "rub": "frotado", "patter": "repiqueteo", "clickety-clack": "traqueteo",
+    "propeller": "hélice", "airscrew": "hélice",
+    "fixed-wing aircraft": "avión",
+    "race car": "auto de carreras", "auto racing": "carrera de autos",
+    "artillery fire": "disparos",
 }
 
 # Traducciones de palabras sueltas para etiquetas compuestas no cubiertas
@@ -470,6 +501,7 @@ PALABRAS: dict[str, str] = {
     "tap": "canilla", "faucet": "grifo", "van": "camioneta", "synthesizer": "sintetizador",
     "microphone": "micrófono", "whistle": "silbato", "rattle": "sonajero",
     "or": "o", "and": "y", "manmade": "artificial", "mammal": "mamífero",
+    "etc": "etcétera",
 }
 
 # Palabras que se descartan del resultado final (poco informativas solas)
@@ -477,6 +509,7 @@ PALABRAS_BASURA = {
     "inside", "outside", "music", "noise", "sound", "sound effect", "effects unit",
     "vibration", "pulse", "beep", "tone", "static", "echo", "field recording",
     "environmental noise", "public space", "small room", "large room or hall",
+    "etcétera",
 }
 
 
@@ -485,7 +518,10 @@ def _traducir_etiqueta(etiqueta_en: str) -> str:
     Traduce una etiqueta de AudioSet a español usando el glosario.
 
     AudioSet agrupa varios conceptos en una etiqueta separados por comas
-    (ej: "Male speech, man speaking"). Se traduce cada parte por separado.
+    (ej: "Male speech, man speaking") y usa paréntesis como aclaración
+    (ej: "Zipper (clothing)", "Roaring cats (lions, tigers)"). Se normalizan
+    los paréntesis a partes separadas por coma para que cada componente se
+    traduzca con el glosario (evita fugas de inglés tipo "zipper (clothing").
     Primero busca cada parte completa; si no está, traduce palabra por palabra
     con PALABRAS (las palabras no mapeadas se dejan en inglés).
 
@@ -496,6 +532,8 @@ def _traducir_etiqueta(etiqueta_en: str) -> str:
         Etiqueta traducida al español (o normalizada en inglés si no hay mapeo).
     """
     etiqueta = etiqueta_en.strip().lower()
+    # Aclaraciones entre paréntesis → partes independientes (ver docstring)
+    etiqueta = etiqueta.replace("(", ", ").replace(")", "")
 
     # Dividir por comas (cada concepto se traduce por separado)
     partes_originales = [p.strip() for p in etiqueta.split(",") if p.strip()]
@@ -886,6 +924,11 @@ def _ejecutar(conn, args, rows, tagging) -> None:
             if etiqueta not in vistos:
                 vistos.add(etiqueta)
                 unicos.append((etiqueta, prob))
+
+        # Corte duro a top_k: las etiquetas compuestas ("voz masculina, hombre
+        # hablando") se separan en varias partes y pueden exceder top_k; el
+        # contrato es N etiquetas por media (plan_keywords.md etapa 3).
+        unicos = unicos[: args.top_k]
 
         texto_es = ", ".join(e for e, _ in unicos)
         raw = [{"name": n, "prob": round(p, 4)} for n, p in top]

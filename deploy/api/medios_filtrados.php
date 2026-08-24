@@ -6,6 +6,7 @@
  *   color     (string, opcional; acepta valores separados por coma)
  *   provincia (string, opcional; acepta valores separados por coma)
  *   tag       (string, opcional; acepta valores separados por coma)
+ *   horas     (string, opcional; valores 0..23 separados por coma; filtra por franja [min,max] en hora local Argentina UTC-3)
  *   tipo      (string, opcional: image,video,audio,text — separado por coma;
  *              'text' devuelve los medios type='text' (textos del viaje))
  *   limite    (int, opcional, default 20)
@@ -19,6 +20,7 @@ $municipio = isset($_GET['municipio']) ? trim($_GET['municipio']) : '';
 $color     = isset($_GET['color'])     ? trim($_GET['color'])     : '';
 $provincia = isset($_GET['provincia']) ? trim($_GET['provincia']) : '';
 $tag       = isset($_GET['tag'])       ? trim($_GET['tag'])       : '';
+$horas     = isset($_GET['horas'])    ? trim($_GET['horas'])     : '';
 $tipoStr   = isset($_GET['tipo'])      ? trim($_GET['tipo'])      : '';
 $limite    = isset($_GET['limite'])    ? max(1, min(20, (int)$_GET['limite'])) : 5;
 
@@ -56,6 +58,15 @@ $colores = valores_param($color);
 $provincias = valores_param($provincia);
 $tags = valores_param($tag);
 
+$horasSelec = [];
+foreach (valores_param($horas) as $hv) {
+    if (is_numeric($hv)) {
+        $ih = (int)$hv;
+        if ($ih >= 0 && $ih <= 23) $horasSelec[] = $ih;
+    }
+}
+$horasSelec = array_values(array_unique($horasSelec));
+
 agregar_in($condiciones, $params, 'm.municipio', 'municipio', $municipios);
 agregar_in($condiciones, $params, 'm.provincia', 'provincia', $provincias);
 
@@ -77,6 +88,14 @@ if (count($tags)) {
         $params[$k] = '%,' . minusculas_utf8_ligero($valor) . ',%';
     }
     $condiciones[] = 'm.keywords IS NOT NULL AND (' . implode(' OR ', $partesTag) . ')';
+}
+
+// Franja horaria simple [min,max] sobre hora local Argentina UTC-3
+// (la DB guarda m.hora en UTC como 'HH:MM'; medios con hora NULL quedan excluidos con el filtro activo)
+if (count($horasSelec)) {
+    $params[':hmin'] = min($horasSelec);
+    $params[':hmax'] = max($horasSelec);
+    $condiciones[] = "((CAST(substr(m.hora,1,2) AS INTEGER) - 3 + 24) % 24) BETWEEN :hmin AND :hmax";
 }
 
 $where = '';
@@ -111,7 +130,9 @@ foreach ($tipos as $tipo) {
 
     $stmt = $pdo->prepare($sql);
     foreach ($params as $k => $v) {
-        $stmt->bindValue($k, $v);
+        // Los enteros (ej: :hmin/:hmax de la franja horaria) se vinculan como INT;
+        // si se vinculan como STR, SQLite compara entero < texto y no hay coincidencias.
+        $stmt->bindValue($k, $v, is_int($v) ? PDO::PARAM_INT : PDO::PARAM_STR);
     }
     $stmt->bindValue(':tipo', $tipo);
     $stmt->bindValue(':limite', $limite, PDO::PARAM_INT);
@@ -128,6 +149,7 @@ echo json_encode([
         'color'     => $color,
         'provincia' => $provincia,
         'tag'       => $tag,
+        'horas'     => $horasSelec,
         'tipos'     => $tipos,
         'limite'    => $limite
     ],

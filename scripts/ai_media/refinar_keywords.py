@@ -81,17 +81,27 @@ SINONIMOS: dict[str, list[str]] = {
     "naturaleza": ["campo", "paisaje natural", "nature", "outdoor"],
     "bosque": ["bosques", "selva", "arboleda", "forest"],
     "árbol": ["arboles", "arbol", "árboles", "plantas", "tree", "branch", "rama", "ramas", "branches"],
-    "animales": ["animal", "vaca", "vacas", "caballo", "caballos", "perro", "perros",
+    # "caballo"/"caballos" retirados de animales (Ago 2026): específicos y
+    # con sentido propio, quedan como tags independientes.
+    "animales": ["animal", "vaca", "vacas", "perro", "perros",
                  "gato", "gatos", "oveja", "ovejas", "burro", "burros", "ganado", "animals"],
     "comida": ["gastronomía", "comidas", "plato", "platos", "almuerzo", "cena", "desayuno", "asado", "food"],
     "personas": ["persona", "hombres", "mujeres",
                  "caminante", "caminantes", "viajero", "viajeros", "baqueano", "people"],
     "deporte": ["deportes", "competición", "carrera", "sport"],
     "ciclismo": ["ciclista", "ciclistas", "cycling", "cyclist", "cyclists", "pedaleando"],
-    "viaje": ["trayecto", "recorrido", "ruta viajera", "trip", "adventure", "aventura", "road trip", "viaje en ruta"],
+    # "aventura" retirada de viaje (Ago 2026): significativa por separado.
+    "viaje": ["trayecto", "recorrido", "ruta viajera", "trip", "adventure", "road trip", "viaje en ruta"],
     "fotografía": ["foto", "fotos", "imagen", "imágenes", "retrato fotográfico", "photography"],
-    "urbanismo": ["edificios", "edificio", "rascacielos", "construcción", "buildings"],
-    "arquitectura": ["edificaciones", "fachada", "fachadas", "architecture"],
+    # "urbanismo" ELIMINADO (Ago 2026): sus variantes eran semánticamente
+    # erradas (urbanismo = planificación urbana, no edificios). Los términos
+    # de construcción pasan a la familia de "arquitectura"; "urbanismo"
+    # queda como tag libre válido.
+    # Familia de arquitectura ampliada (plan_keywords §3.2): absorbe los
+    # términos de edificios del viejo "urbanismo" + la familia adjetival.
+    "arquitectura": ["edificaciones", "fachada", "fachadas", "architecture",
+                     "edificio", "edificios", "rascacielos", "buildings",
+                     "arquitectónico", "arquitectonico"],
     "noche": ["nocturna", "nocturno", "noche estrellada", "night"],
     "cielo": ["cielos", "nubes", "cielo azul", "horizonte", "sky", "clouds", "cloud"],
     "lluvia": ["lluvioso", "tormenta", "tormentas", "llovizna", "rain"],
@@ -104,7 +114,8 @@ SINONIMOS: dict[str, list[str]] = {
     "amigo": ["amigos", "compañero", "compañeros", "compañera", "friends"],
     "felicidad": ["alegría", "sonrisa", "sonrisas", "risa", "risas", "smile"],
     "cansancio": ["fatiga", "agotamiento", "tired"],
-    "mochila": ["mochilas", "equipaje", "alforjas", "alforja", "bolso", "bolsos", "backpack", "pannier", "alforja"],
+    # "equipaje" retirado de mochila (Ago 2026): significativo por separado.
+    "mochila": ["mochilas", "alforjas", "alforja", "bolso", "bolsos", "backpack", "pannier"],
     "carpas": ["carpa", "campamento", "acampar", "campaña", "camping", "camp"],
     "comida_argentina": ["empanadas", "asado", "milanesa", "locro", "mate", "dulce de leche"],
     "mate": ["yerba", "termo"],
@@ -118,16 +129,35 @@ SINONIMOS: dict[str, list[str]] = {
     "senderismo": ["trail", "sendero", "hiking"],
     "esfuerzo": ["effort", "esfuerzos"],
     "paisaje": ["landscape", "scenery", "vista"],
+    # Familias reales detectadas en los datos (plan_keywords §3.3, Ago 2026):
+    # colapsan variantes descriptivas hacia el sustantivo base.
+    "abandono": ["abandonado"],
+    "aislamiento": ["aislado"],
+    "agricultura": ["agrícola"],
+    "agua": ["agua fangosa", "agua turbia", "agua potable"],
+    "acera": ["acera colorida"],
+    "urbano": ["ambiente urbano", "arquitectura urbana"],
+    "apoyo": ["apoyo mutuo", "apoyo social", "apoyo grupal",
+              "ayuda", "ayuda mutua", "asistencia"],
     # Variantes de nombres propios leídos de la escena (visión) — un mismo lugar
     # aparece con varias formas según cómo lo leyó minicpm y lo tradujo
     # translategemma (análisis de frecuencia-1, Ago 2026).
     "bell ville": ["villa bell"],
     "monte buey": ["monte bué", "monte bley", "cerro boyero"],
-    "melincué": ["melincue"],
+    "melincué": ["melincue", "laguna de melincüe"],
     "chacabuco": ["chacabú"],
     "james craik": ["james craig"],
     "ruta sanmartiniana": ["ruta santamarianense"],
     "bottasso": ["botta"],
+    # Lugares de 3+ palabras (plan_keywords §3.1): canónicos con variantes
+    # vacías SOLO para que _es_frase_basura no los descarte como regurgitación.
+    "carmen de areco": [],
+    "san andrés de giles": [],
+    "san josé de la dormida": [],   # localidad real (Dpto. Ischilín, Córdoba)
+    "mar del plata": [],
+    # Provincia mal transcripta por gemma: la variante con error se corrige
+    # hacia el nombre correcto.
+    "santiago del estero": ["santiago de lestero"],
     # Nombres propios que NO se deben singularizar ni descartar como basura.
     "bicivilizados": ["bicivilizado"],                 # nombre del programa de radio (feed 435)
     "dardo s. dorronzoro": ["dardo", "s. dorronzoro"],  # monumento en Luján
@@ -142,6 +172,10 @@ STOPWORDS = {
     "este", "esta", "eso", "esa", "una escena", "escena", "otro", "otra",
     "image", "photo", "scene", "outdoor", "object", "objects", "color", "colors",
     "person", "people", "colours",
+    # Artefactos de gemma y genéricos sueltos (plan_keywords §3.4-§3.5):
+    # "agobo" y "amágimador" son palabras imposibles generadas por el modelo;
+    # "actividad" sola es demasiado genérica.
+    "actividad", "agobo", "amágimador",
 }
 
 # Patrones de ruido del modelo (cuando regurgitó el prompt en vez de keywords)
@@ -222,15 +256,20 @@ def es_basura(palabra: str) -> bool:
 def singularizar(palabra: str) -> str:
     """Plural → singular simple (montañas → montaña, perros → perro, autos → auto).
 
-    CONSERVADOR: NO toca palabras terminadas en "-es" (árboles, flores, viajes,
-    atardeceres) porque la regla no es segura sin morfología — los casos comunes
-    del dominio ya están cubiertos por SINONIMOS (se aplica antes).
+    CONSERVADOR:
+    - NO toca palabras terminadas en "-es" (árboles, flores, viajes,
+      atardeceres) porque la regla no es segura sin morfología — los casos
+      comunes del dominio ya están cubiertos por SINONIMOS (se aplica antes).
+    - NO toca palabras terminadas en vocal ACENTUADA + "s" (-ás, -és, -ís):
+      ahí la "s" NO marca plural y recortarla destroza la palabra
+      (bug corregido Ago 2026: estrés→estr, interés→interé, país→paí).
     """
     if not palabra or len(palabra) < 4:
         return palabra
-    # -s tras vocal simple, salvo "-es" (no confiable): montañas→montaña, perros→perro
+    # -s tras vocal simple SIN acento: montañas→montaña, perros→perro.
+    # Las vocales acentuadas quedan fuera: vocal acentuada + s nunca es plural.
     if (palabra.endswith("s") and len(palabra) > 3
-            and palabra[-2] in "aeiouáéíóú"
+            and palabra[-2] in "aeiou"
             and not palabra.endswith("es")):
         return palabra[:-1]
     return palabra

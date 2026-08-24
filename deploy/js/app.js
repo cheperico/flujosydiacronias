@@ -800,6 +800,7 @@
             if (btn.dataset.valor === nombre) btn.classList.toggle('activo');
         });
         actualizarInfoColores();
+        cargarMediosFiltrados();
     }
 
     function actualizarInfoColores() {
@@ -852,6 +853,7 @@
         actualizarInfoHoras();
         // Transicionar paleta
         paletaTarget = interpolar(horaActual);
+        cargarMediosFiltrados();
     }
 
     function actualizarInfoHoras() {
@@ -922,6 +924,7 @@
         actualizarInfoProvincias();
         // Reflejar los municipios marcados/desmarcados en su bloque.
         rerenderBloque('municipios');
+        cargarMediosFiltrados();
     }
 
     function actualizarInfoProvincias() {
@@ -963,6 +966,7 @@
             if (btn.dataset.valor === nombre) btn.classList.toggle('activo');
         });
         actualizarInfoMunicipios();
+        cargarMediosFiltrados();
     }
 
     function actualizarInfoMunicipios() {
@@ -1020,6 +1024,7 @@
             if (btn.dataset.valor === nombre) btn.classList.toggle('activo');
         });
         actualizarInfoTags();
+        cargarMediosFiltrados();
     }
 
     function actualizarInfoTags() {
@@ -1040,6 +1045,7 @@
         if (coloresSeleccionados.length) params.color = coloresSeleccionados.join(',');
         if (provinciasSeleccionadas.length) params.provincia = provinciasSeleccionadas.join(',');
         if (tagsSeleccionados.length) params.tag = tagsSeleccionados.join(',');
+        if (horasSeleccionadas.length) params.horas = horasSeleccionadas.join(',');
         return params;
     }
 
@@ -1051,7 +1057,7 @@
             return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
         }).join('&');
         if (qs) qs += '&';
-        qs += 'limite=30&tipo=image,audio,text';  // imágenes slideshow, audios y textos
+        qs += 'limite=30&tipo=image,video,audio,text';  // imágenes slideshow, videos, audios y textos
 
         return fetch('api/medios_filtrados.php?' + qs)
             .then(function(r) { return r.json(); })
@@ -1072,7 +1078,7 @@
 
     function renderMediaBlocks() {
         // Re-renderear todos los bloques de medios
-        ['imagenes', 'sonidos', 'textos', 'comunicacion'].forEach(function(id) {
+        ['imagenes', 'videos', 'sonidos', 'textos', 'comunicacion'].forEach(function(id) {
             var bloque = document.getElementById('bloque-' + id);
             if (!bloque) return;
             var cont = bloque.querySelector('.bloque-contenido');

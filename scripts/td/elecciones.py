@@ -105,8 +105,21 @@ def _consulta_colores(conn: sqlite3.Connection) -> list[tuple[str, int]]:
     return _ordenar_alfabetico(pares)
 
 
+CLAVES_TAGS: tuple[str, ...] = (
+    "ia_keywords",
+    "ia_keywords_transcripcion",
+    "ia_keywords_texto",
+    "ia_keywords_sonido",
+    "ia_keywords_video",
+)
+
+
 def _consulta_tags(conn: sqlite3.Connection) -> list[tuple[str, int]]:
-    """Keywords de ia_keywords (plano o JSON) contadas individualmente.
+    """Keywords de todas las fuentes (plano o JSON) contadas individualmente.
+
+    Fuentes: ia_keywords (visión), ia_keywords_transcripcion (habla),
+    ia_keywords_texto (.md), ia_keywords_sonido (sonidos), ia_keywords_video
+    (video, camino fotos).
 
     Se conserva el cuarto más significativo por frecuencia (top 25%), que
     elimina el ruido de keywords que aparecen una sola vez. El cuarto está
@@ -114,8 +127,10 @@ def _consulta_tags(conn: sqlite3.Connection) -> list[tuple[str, int]]:
     de TouchDesigner (~250 args). Dentro del conjunto seleccionado, el orden
     es alfabético.
     """
+    marcadores = ",".join("?" * len(CLAVES_TAGS))
     filas = conn.execute(
-        "SELECT value FROM media_metadata WHERE key='ia_keywords'"
+        f"SELECT value FROM media_metadata WHERE key IN ({marcadores})",
+        CLAVES_TAGS,
     ).fetchall()
     contador: dict[str, int] = {}
     for fila in filas:

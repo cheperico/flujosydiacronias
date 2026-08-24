@@ -72,6 +72,8 @@ PREFIJOS_META_ES: tuple[str, ...] = (
     "para describir la imagen en detalle, analizamos",
     "para describir la imagen,",
     "para describir la imagen en detalle,",
+    "para describir la imagen:",
+    "para describir la imagen en detalle:",
     "aquí hay una descripción larga de la imagen:",
     "aquí hay una descripción detallada de la imagen:",
     "aquí hay una descripción de la imagen:",

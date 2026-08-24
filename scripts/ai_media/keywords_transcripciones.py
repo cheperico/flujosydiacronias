@@ -15,9 +15,11 @@ clave de salida en `media_metadata` y (4) el encabezado del prompt.
     `type='text'` y guarda en `ia_keywords_texto`.
 
 En ambos casos llama a un modelo de texto de Ollama (gemma3:latest) para extraer
-las keywords del SENTIDO en español (5-8: temas, conceptos, lugares, personas,
-clima, emociones... no solo palabras literales). Las claves de salida NO se
-mezclan con `ia_keywords`, que es de visión para imágenes.
+las keywords del SENTIDO en español: EXACTAMENTE 5 (temas, lugares, actividades,
+personas, emociones, clima... no solo palabras literales), entregadas como un
+objeto JSON {"tags": ["a", "b", "c", "d", "e"]} que se parsea y se guarda
+coma-separado en la DB. Las claves de salida NO se mezclan con `ia_keywords`,
+que es de visión para imágenes.
 
 Uso:
     python scripts/ai_media/keywords_transcripciones.py                               # transcripciones, solo pendientes (default)
@@ -63,64 +65,51 @@ MODELO_TEXTO_DEFAULT = "gemma3:latest"
 # ── Umbrales ─────────────────────────────────────────────────────────────────
 MIN_TEXTO_LEN = 40            # menos de N caracteres → no hay contenido útil
 MAX_TEXTO_CHARS = 6000        # truncar el texto que se envía al modelo
-MAX_KEYWORDS = 8              # recortar a 8 keywords como máximo
+MAX_KEYWORDS = 5              # cap defensivo: el prompt pide exactamente 5; recortar si devuelve más
 TIMEOUT_SEG = 120             # timeout de la llamada a Ollama
 
 # ── Prompts de extracción (mismas reglas; cambia la cabecera) ────────────────
-# Prompt endurecido P2 (ganador del A/B contra qwen2.5:3b, Ago 2026):
-# reglas explícitas de formato, significado, palabras prohibidas, fidelidad,
-# artefactos de voz y keywords compuestas. El terminador ("Transcripción:\n" /
-# "Texto:\n") y la estructura de concatenación NO cambian: `extraer_keywords_*`
-# concatena prompt + texto fuente, por lo que el parseo queda intacto.
+# Prompt FUSIONADO (Ene 2026): las 7 reglas endurecidas P2 (ganadoras del A/B
+# contra qwen2.5:3b) + contrato de salida JSON con EXACTAMENTE 5 keywords
+# (gemma saturaba el viejo "entre 5 y 8" siempre en 8, fragmentando la nube).
+# El terminador ("Transcripción:\n" / "Texto:\n") y la estructura de
+# concatenación NO cambian: `extraer_keywords_*` concatena prompt + texto
+# fuente, por lo que el parseo queda intacto.
 PROMPT_KEYWORDS_TRANSCRIPCION = (
-    "Leé esta transcripción de audio/video y extraé las keywords del SENTIDO de lo que se dice "
+    "Analizá la transcripción y extraé las keywords del SENTIDO de lo que se dice "
     "(de qué trata realmente, no de las palabras sueltas).\n"
     "Reglas OBLIGATORIAS:\n"
-    "1. Formato: SOLO entre 5 y 8 keywords en ESPAÑOL, separadas por comas. Sin texto adicional, "
-    "sin numeración, sin explicaciones.\n"
-    "2. Las keywords salen del SIGNIFICADO: temas, conceptos, lugares, actividades, personas, "
-    "emociones, clima, objetos, transporte, comida, sensaciones. Si dice 'la subida al cerro fue "
-    "dura, las piernas no daban más', sirve 'esfuerzo' o 'cansancio' aunque no sean palabras "
-    "textuales.\n"
-    "3. PROHIBIDO usar como keyword palabras vacías o muletillas: bien, buen, buena, bueno, "
-    "finalmente, falta, tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo "
-    "que la luz sea el tema central). Cada keyword debe aportar información concreta.\n"
-    "4. NO copies errores de transcripción: si una palabra es un artefacto de voz (palabra "
-    "inventada, fragmento sin sentido, nombre suelto), ignorala. Quedate con la idea de la frase "
-    "completa, no con el sonido.\n"
-    "5. Sé FIEL: no agregues interpretaciones, juicios ni opiniones que el texto no sostenga. Si "
-    "alguien cuenta que se ayudaron entre todos, la keyword es 'solidaridad' o 'ayuda mutua' — "
-    "nunca 'sociedad individualista'.\n"
-    "6. Escribí bien las keywords compuestas: respetá género y número ('instalaciones religiosas', "
-    "'sal viva', 'actitudes samaritanas').\n"
-    "7. Preferí palabras de contenido concreto (actividades, lugares, objetos, personas, emociones, "
-    "clima, transporte, comida) antes que adverbios o adjetivos genéricos.\n\n"
+    "1. Formato: SOLO un objeto JSON válido con exactamente 5 keywords en ESPAÑOL: "
+    "{\"tags\": [\"a\", \"b\", \"c\", \"d\", \"e\"]}. Sin texto adicional. El ejemplo es solo "
+    "formato; sus tags NO pertenecen a este texto.\n"
+    "2. Las keywords salen del SIGNIFICADO: temas, lugares, actividades, personas, emociones, "
+    "clima, objetos, transporte, comida, sensaciones.\n"
+    "3. PROHIBIDO palabras vacías o muletillas: bien, buen, buena, bueno, finalmente, falta, "
+    "tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo tema central).\n"
+    "4. NO copies errores de transcripción: si una palabra es artefacto de voz, ignorala.\n"
+    "5. Sé FIEL: no agregues interpretaciones que el texto no sostenga (si se ayudaron → "
+    "'solidaridad', nunca 'sociedad individualista').\n"
+    "6. Escribí bien las compuestas: respetá género y número.\n"
+    "7. Preferí palabras de contenido concreto antes que adverbios o adjetivos genéricos.\n\n"
     "Transcripción:\n"
 )
 
 PROMPT_KEYWORDS_TEXTO = (
-    "Leé este **texto** y extraé las keywords del SENTIDO de lo que se dice "
+    "Analizá este **texto** y extraé las keywords del SENTIDO de lo que se dice "
     "(de qué trata realmente, no de las palabras sueltas).\n"
     "Reglas OBLIGATORIAS:\n"
-    "1. Formato: SOLO entre 5 y 8 keywords en ESPAÑOL, separadas por comas. Sin texto adicional, "
-    "sin numeración, sin explicaciones.\n"
-    "2. Las keywords salen del SIGNIFICADO: temas, conceptos, lugares, actividades, personas, "
-    "emociones, clima, objetos, transporte, comida, sensaciones. Si dice 'la subida al cerro fue "
-    "dura, las piernas no daban más', sirve 'esfuerzo' o 'cansancio' aunque no sean palabras "
-    "textuales.\n"
-    "3. PROHIBIDO usar como keyword palabras vacías o muletillas: bien, buen, buena, bueno, "
-    "finalmente, falta, tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo "
-    "que la luz sea el tema central). Cada keyword debe aportar información concreta.\n"
-    "4. NO copies errores de transcripción: si una palabra es un artefacto de voz (palabra "
-    "inventada, fragmento sin sentido, nombre suelto), ignorala. Quedate con la idea de la frase "
-    "completa, no con el sonido.\n"
-    "5. Sé FIEL: no agregues interpretaciones, juicios ni opiniones que el texto no sostenga. Si "
-    "alguien cuenta que se ayudaron entre todos, la keyword es 'solidaridad' o 'ayuda mutua' — "
-    "nunca 'sociedad individualista'.\n"
-    "6. Escribí bien las keywords compuestas: respetá género y número ('instalaciones religiosas', "
-    "'sal viva', 'actitudes samaritanas').\n"
-    "7. Preferí palabras de contenido concreto (actividades, lugares, objetos, personas, emociones, "
-    "clima, transporte, comida) antes que adverbios o adjetivos genéricos.\n\n"
+    "1. Formato: SOLO un objeto JSON válido con exactamente 5 keywords en ESPAÑOL: "
+    "{\"tags\": [\"a\", \"b\", \"c\", \"d\", \"e\"]}. Sin texto adicional. El ejemplo es solo "
+    "formato; sus tags NO pertenecen a este texto.\n"
+    "2. Las keywords salen del SIGNIFICADO: temas, lugares, actividades, personas, emociones, "
+    "clima, objetos, transporte, comida, sensaciones.\n"
+    "3. PROHIBIDO palabras vacías o muletillas: bien, buen, buena, bueno, finalmente, falta, "
+    "tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo tema central).\n"
+    "4. NO copies errores de transcripción: si una palabra es artefacto de voz, ignorala.\n"
+    "5. Sé FIEL: no agregues interpretaciones que el texto no sostenga (si se ayudaron → "
+    "'solidaridad', nunca 'sociedad individualista').\n"
+    "6. Escribí bien las compuestas: respetá género y número.\n"
+    "7. Preferí palabras de contenido concreto antes que adverbios o adjetivos genéricos.\n\n"
     "Texto:\n"
 )
 
@@ -262,33 +251,55 @@ def _parsear_keywords(respuesta: str) -> list[str]:
     """
     Convierte la respuesta del modelo en lista de keywords limpias.
 
-    Soporta tres formatos:
-      - JSON:  ["perro", "ruta"]  o  {"keywords": ["perro", "ruta"]}
-      - Texto: "perro, ruta, sol"
-      - Texto con numeración: "1. perro 2. ruta"
+    Formato esperado (prompt fusionado): objeto JSON con clave "tags":
+      {"tags": ["perro", "ruta", "sol", "campo", "viento"]}
+
+    Fallbacks por robustez (respuestas fuera del contrato):
+      - Objeto JSON con claves alternativas ("keywords", "palabras_clave").
+      - Array JSON plano: ["perro", "ruta"].
+      - Bloque de código markdown (```json ... ```).
+      - JSON casi-válido con restos alrededor (ej. "}:" tras la llave):
+        rescata el array de "tags" por regex.
+      - Texto coma-separado: "perro, ruta, sol".
+      - Texto con numeración: "1. perro 2. ruta".
+
+    Cap defensivo: si el modelo devuelve más de MAX_KEYWORDS (5), se conservan
+    las primeras 5.
 
     Args:
         respuesta: Texto crudo devuelto por Ollama.
 
     Returns:
-        Lista de keywords limpias (sin ruido).
+        Lista de keywords limpias (sin ruido), máximo MAX_KEYWORDS.
     """
     if not respuesta:
         return []
     texto = respuesta.strip()
 
+    # 0. Quitar vallas markdown (```json ... ```) si el modelo las agrega
+    coincidencia = re.search(r"```(?:json)?\s*(.*?)\s*```", texto, flags=re.DOTALL)
+    if coincidencia:
+        texto = coincidencia.group(1).strip()
+
     # 1. Intentar parsear como JSON
+    partes: list[str] = []
     try:
         datos = json.loads(texto)
         if isinstance(datos, list):
             partes = [str(x) for x in datos]
         elif isinstance(datos, dict):
-            kws = datos.get("keywords") or datos.get("palabras_clave") or []
+            kws = (datos.get("tags") or datos.get("keywords")
+                   or datos.get("palabras_clave") or [])
             partes = [str(x) for x in kws] if isinstance(kws, list) else [str(kws)]
         else:
             partes = []
     except (json.JSONDecodeError, TypeError):
-        partes = []
+        # 1b. JSON malformado pero con el contrato nuevo visible (ej. el modelo
+        # dejó restos como "}:" tras la llave de cierre): rescatar el array de
+        # "tags" por regex antes de caer al fallback por comas.
+        coincidencia_tags = re.search(r'"tags"\s*:\s*\[(.*?)\]', texto, flags=re.DOTALL)
+        if coincidencia_tags:
+            partes = re.split(r"[,\n]+", coincidencia_tags.group(1))
 
     # 2. Fallback: separar por comas / saltos
     if not partes:
@@ -299,7 +310,7 @@ def _parsear_keywords(respuesta: str) -> list[str]:
         limpia = _limpiar_keyword(p)
         if limpia and not _es_basura(limpia) and limpia not in resultado:
             resultado.append(limpia)
-    return resultado
+    return resultado[:MAX_KEYWORDS]
 
 
 def extraer_keywords_transcripcion(

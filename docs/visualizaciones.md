@@ -117,7 +117,32 @@ ciclo de 5 minutos de duración.
 
 ---
 
-## 5. Pendientes / Próximos pasos
+## 5. Filtros conectados a todos los medios (Ago 2026)
+
+### Decisión
+Todos los chips de selección (colores, horas, provincias, municipios, tags)
+filtran **todos los bloques de medios** (imágenes, videos, sonidos, textos).
+La conexión es **en vivo**: al tocar cualquier chip se recargan los medios
+(`cargarMediosFiltrados()`), con la protección de carreras `MEDIOS_REQUEST_ID`.
+
+### Reglas
+- **Filtros combinados con AND** en `medios_filtrados.php`: municipio IN, provincia IN,
+  color IN (color_1..3), tag (LIKE sobre keywords), horas (rango).
+- **Horas — franja simple**: `[min(horas), max(horas)]` en hora local (Argentina UTC−3).
+  Sin horas → sin filtro; 1 hora → esa hora exacta. El snapshot guarda `hora` en UTC
+  y la API convierte a local.
+- **Videos incluidos**: el bloque Videos se llena cuando los filtros coinciden (lista de
+  descripciones). La reproducción (y 360°) sigue pendiente.
+
+### Limitaciones (fase "compleja" pendiente)
+- Sin **cruce de medianoche**: 22 y 2 → franja 2–22 amplia.
+- **Textos sin hora**: no tienen `timestamp_utc` → quedan fuera del filtro por horas.
+- **Sin resultados**: si un filtro no encuentra medios, los bloques muestran "—";
+  falta decidir qué hacer en ese caso.
+
+---
+
+## 6. Pendientes / Próximos pasos
 
 ### Inmediatos
 - Conectar API de medios a los bloques de imágenes, videos, textos, sonidos

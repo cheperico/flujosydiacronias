@@ -99,7 +99,7 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 
 | Endpoint | Recibe (GET) | Devuelve |
 |---|---|---|
-| `medios_filtrados.php` | `limite` (1–20), `tipo` (csv), `municipio`, `color`, `provincia`, `tag` (municipio/color/provincia/tag aceptan csv multi-valor) | resultados agrupados por tipo (incluye `titulo` para textos) |
+| `medios_filtrados.php` | `limite` (1–20), `tipo` (csv), `municipio`, `color`, `provincia`, `tag`, `horas` (todos aceptan csv; `horas` filtra por franja `[min,max]` en hora local) | resultados agrupados por tipo (incluye `titulo` para textos) |
 | `servir_medio.php` | `id` (obligatorio), `thumb` (opcional) | archivo binario (MIME, cache 86400 s) |
 | `tags.php` | `limite` (10–100, default 40) | `{total, tags:[{tag, frecuencia, peso}]}` |
 
@@ -123,6 +123,15 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 | `puntos.php` | — | `{total, puntos}` (embeddings) — **hoy 0 puntos** |
 | `mensajes_telegram.php` | `municipio` (obligatorio), `limite` (def 200), `fotos` (bool) | `{total, rango, mensajes + fotos JSON}` |
 
+> **Filtro por horas**: `horas` (csv 0..23) filtra con franja continua `[min,max]`
+> en hora LOCAL del viaje (Argentina, UTC−3). El snapshot guarda `hora` en UTC
+> (columna `hora` = `HH:MM` del `timestamp_utc`) y la API convierte
+> `((h−3+24) mod 24)`. Sin `horas` → sin filtro horario. Los **textos** no tienen
+> `timestamp_utc` (crónicas históricas) → `hora` NULL → se excluyen cuando hay
+> filtro de horas. Limitación conocida: sin cruce de medianoche (22 y 2 → franja
+> 2–22 amplia). El bloque **Videos** ahora se llena con los filtros (lista de
+> descripciones; reproducción pendiente).
+
 > `loop.php` (que servía `spec.json`) se movió a `pruebas/` junto con
 > `prueba_loop.html`: la SPA del deploy NO consume la spec del motor.
 
@@ -141,6 +150,8 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
   mostraría datos viejos (p. ej. descripciones pre-translategemma).
 - **`descripcion`** de todos los medios en el snapshot depende de `ia_description`
   (clave `ia_description` de `media_metadata` en la principal).
+- **Sin resultados en filtros**: si un filtro (p. ej. horas nocturnas) no encuentra
+  medios, los bloques muestran "—". Pendiente decidir qué hacer en ese caso.
 - **No se reproducen videos** (ni 360°): el bloque "Videos" del lienzo es solo
   una lista de descripciones; `servir_medio.php` sirve con `readfile()` sin HTTP
   Range (imprescindible para `<video>`). Opciones para visor 360° en
