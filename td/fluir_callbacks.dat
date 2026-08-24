@@ -25,7 +25,7 @@ El cerebro Python (`scripts/td/puente_td.py` modo 'fluir') envía por el puerto
         chat (es_sistema=0) dentro del rango de fechas de los municipios elegidos.
         Se guardan como filas en fluir_telegram.
     /flujos/fluir/mapa <municipio> <ruta>
-        (0..N, solo si el visitante eligió municipio(s)) Ruta relativa al mapa HTML
+        (0..N, solo si el visitante eligió municipio(s)) Ruta ABSOLUTA al mapa HTML
         del municipio (generado por scripts/mapas_municipio.py, variante 'ruta').
         Se guardan como filas [municipio, ruta] en fluir_mapas.
     /flujos/fluir/fin   <total>           (fin de lote)
@@ -51,7 +51,7 @@ titulo/texto para el contenido real del medio, ver abajo):
   fluir_textos  [media_id, ruta, keypoint, hora, tipo, titulo, texto]  <- text
   fluir_chiches [hora, texto]
   fluir_telegram [id, from_name, texto, hora, fecha, tipo, fotos, municipio]  <- telegram (chat)
-  fluir_mapas   [municipio, ruta]  <- mapa HTML del municipio (ruta relativa)
+  fluir_mapas   [municipio, ruta]  <- mapa HTML del municipio (ruta absoluta)
 
 Un único helper _tabla_para_tipo(tipo) resuelve el nombre de tabla correcto
 para cada tipo: image -> fluir_fotos, video -> fluir_videos, video360 ->
@@ -89,7 +89,7 @@ HEADER_TEXTO = ["media_id", "ruta", "keypoint", "hora", "tipo", "titulo", "texto
 # el mensaje /flujos/fluir/mensaje.
 HEADER_TELEGRAM = ["id", "from_name", "texto", "hora", "fecha", "tipo", "fotos", "municipio"]
 
-# Mapas por municipio: el puente envía la ruta relativa al mapa HTML de cada
+# Mapas por municipio: el puente envía la ruta ABSOLUTA al mapa HTML de cada
 # municipio elegido (generado por scripts/mapas_municipio.py, variante 'ruta').
 # Se guardan como filas [municipio, ruta] en fluir_mapas; no son medios del loop.
 HEADER_MAPA = ["municipio", "ruta"]
@@ -411,7 +411,7 @@ def _recibir_mapa(args):
 
     El puente envía /flujos/fluir/mapa justo después del bloque telegram (solo
     si el visitante eligió municipio(s)). Columnas HEADER_MAPA: [municipio, ruta].
-    La ruta es relativa al mapa HTML generado por scripts/mapas_municipio.py
+    La ruta es ABSOLUTA al mapa HTML generado por scripts/mapas_municipio.py
     (variante 'ruta'); TD la usa para renderizar el mapa del municipio.
     """
     if len(args) < 2:

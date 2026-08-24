@@ -10,9 +10,16 @@ interpolando (lat, lon, ele) contra los puntos del track GPX, y aplicando una
 regla de emisión que colapsa momentos estáticos y emite nuevas filas solo cuando
 hay movimiento suficiente.
 
+GAPS del track: las muestras que caen dentro de un hueco del track mayor que
+`--umbral-gap` (default 1800 s = 30 min) NO se emiten — la interpolación a través
+del hueco produciría una posición falsa (recta entre dos puntos separados por el
+gap). Esos huecos quedan registrados en `ubicacion_video_gaps` para diagnóstico.
+Si un video queda sin ninguna posición válida (todo en gaps), en update/replace se
+limpia su `media.latitude/longitude` previo de track (evita puntos ficticios).
+
 Resultado:
   - `media.latitude/longitude/altitude` = posición al inicio del video
-    (solo si el inicio cae dentro del rango GPX)
+    (primera muestra emitida con track real; no se emite dentro de gaps > umbral)
   - `media_keypoints` key=`ubicacion_video` = posiciones a lo largo del video
     (múltiples filas para videos largos o en movimiento; una sola si estático)
   - `media_metadata` key=`ubicacion_video_estado` = sentinel de procesado
@@ -346,7 +353,9 @@ def _generar_ubicaciones(
                 m["speed_kmh"] = 0.0
 
     # Regla de emisión:
-    # - Primera muestra (offset 0) siempre se emite.
+    # - Muestras dentro de un gap del track > umbral_gap_s NO se emiten
+    #   (la interpolación a través del hueco sería una posición falsa).
+    # - Primera muestra emitida = la primera con track real (post-gap).
     # - Después: emitir solo si speed >= umbral AND distancia desde última emitida >= distancia_minima.
     # - Run de speed < umbral colapsa en UNA fila (la primera del run).
     filas: list[dict] = []
@@ -356,13 +365,24 @@ def _generar_ubicaciones(
     # Trackear run de velocidad baja
     en_pausa = False  # True cuando estamos en una secuencia de speed < umbral
     primera_pausa: dict | None = None  # primera muestra de la pausa actual
+    en_gap = False  # True si la muestra anterior estaba dentro de un hueco
 
     for m in muestras_raw:
+        # Filtro de gap: no emitir posiciones dentro de huecos del track.
+        # Se registra el gap solo en la PRIMERA muestra de cada run de hueco
+        # (evita decenas de entradas idénticas para el mismo gap).
+        if m["gap_s"] is not None and m["gap_s"] > umbral_gap_s:
+            if not en_gap:
+                gaps.append({"offset_s": m["offset_s"], "gap_s": round(m["gap_s"], 1)})
+            en_gap = True
+            continue
+        en_gap = False
+
         es_primera = ultimo_emitido is None
         en_movimiento = m["speed_kmh"] >= umbral_movimiento_kmh
 
         if es_primera:
-            # Siempre emitir la primera
+            # Emitir la primera (ya tiene track real, el gap se filtró arriba)
             filas.append({
                 "offset_s": m["offset_s"],
                 "dt": m["dt"],
@@ -373,9 +393,6 @@ def _generar_ubicaciones(
             ultimo_emitido = m
             en_pausa = False
             primera_pausa = None
-            # Registrar gap si es grande
-            if m["gap_s"] is not None and m["gap_s"] > umbral_gap_s:
-                gaps.append({"offset_s": m["offset_s"], "gap_s": round(m["gap_s"], 1)})
             continue
 
         if en_movimiento:
@@ -395,9 +412,6 @@ def _generar_ubicaciones(
                     "ele": m["ele"],
                 })
                 ultimo_emitido = m
-                # Registrar gap si es grande
-                if m["gap_s"] is not None and m["gap_s"] > umbral_gap_s:
-                    gaps.append({"offset_s": m["offset_s"], "gap_s": round(m["gap_s"], 1)})
         else:
             # Velocidad baja: colapsar en UNA fila
             if not en_pausa:
@@ -412,14 +426,15 @@ def _generar_ubicaciones(
                     "ele": m["ele"],
                 })
                 ultimo_emitido = m
-                # Registrar gap
-                if m["gap_s"] is not None and m["gap_s"] > umbral_gap_s:
-                    gaps.append({"offset_s": m["offset_s"], "gap_s": round(m["gap_s"], 1)})
             # Si ya estamos en pausa, no emitir nada más hasta que cambie el estado
 
     # Emitir fila final si la última emitida no cubre el fin del video
+    # (y el fin no cae dentro de un gap del track > umbral)
     duracion_total_s = round(duration_secs, 1)
-    if ultimo_emitido is not None and ultimo_emitido["offset_s"] < duracion_total_s:
+    gap_final = _gap_entre_puntos_bracket(puntos_tiempo, fin)
+    if gap_final is not None and gap_final > umbral_gap_s:
+        gaps.append({"offset_s": duracion_total_s, "gap_s": round(gap_final, 1)})
+    elif ultimo_emitido is not None and ultimo_emitido["offset_s"] < duracion_total_s:
         # Interpolar posición exacta al final
         pos_final = _interpolar_en_track(puntos_tiempo, fin)
         if pos_final is not None:
@@ -432,10 +447,6 @@ def _generar_ubicaciones(
                 "ele": ele_f,
             })
             ultimo_emitido_fict = {"lat": lat_f, "lon": lon_f, "offset_s": duracion_total_s}
-            # Gap del final
-            gap_f = _gap_entre_puntos_bracket(puntos_tiempo, fin)
-            if gap_f is not None and gap_f > umbral_gap_s:
-                gaps.append({"offset_s": duracion_total_s, "gap_s": round(gap_f, 1)})
 
     # Defensivo: ordenar por offset y deduplicar filas consecutivas más
     # cercanas que distancia_minima
@@ -669,6 +680,15 @@ def procesar_conexion(
             log.info("  [%s] %-55s — sin interpolaciones válidas", mid, titulo)
             if not dry_run:
                 _marcar_estado(conn, mid, ESTADO_SIN_DATOS)
+                # Si el GPS previo vino del track (posible posición falsa por gap),
+                # limpiarlo en update/replace para que el mapa no muestre un punto ficticio.
+                if mode in ("update", "replace") and gps_es_track:
+                    conn.execute(
+                        "UPDATE media SET latitude=NULL, longitude=NULL, altitude=NULL, "
+                        "geolocation_source=NULL, updated_at=datetime('now') WHERE id=?",
+                        (mid,),
+                    )
+                    log.info("  [%s] GPS previo de track limpiado (sin cobertura real)", mid)
             continue
 
         # Empezar la primera fila desde offset 0 del video (no desde inicio_efectivo)
@@ -786,8 +806,8 @@ Ejemplos:
         help="Distancia mínima entre ubicaciones emitidas, en metros (default 100)",
     )
     parser.add_argument(
-        "--umbral-gap", type=float, default=600.0,
-        help="Gap GPX máximo antes de flaggear, en segundos (default 600)",
+        "--umbral-gap", type=float, default=1800.0,
+        help="Gap GPX máximo antes de NO emitir posición, en segundos (default 1800 = 30 min)",
     )
     parser.add_argument(
         "--solo-360", action="store_true",

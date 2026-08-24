@@ -110,7 +110,8 @@ COMANDOS:
 
   mapa-municipios   Genera un mapa HTML por municipio recorrido, con variantes
                     (ruta, puntos, contexto, gradiente). Nombre:
-                    mapa_municipio_<municipio>_<variante>.html
+                    mapa_municipio_<municipio>_<variante>.html (sin acentos:
+                    'Río Hondo' -> 'Rio_Hondo')
                     Ej: python flujos.py mapa-municipios --variantes ruta,puntos
 
   export-csv        Exporta todas las tablas de la DB a archivos CSV.
@@ -2134,7 +2135,8 @@ def opcion_mapas_municipio(db_path: str | None = None):
     limpiar_pantalla()
     print("=== MAPAS POR MUNICIPIO (Folium) ===\n")
     print("  Genera un mapa HTML por cada municipio recorrido, con variantes.\n")
-    print("  Cada archivo sigue la lógica: mapa_municipio_<municipio>_<variante>.html\n")
+    print("  Cada archivo sigue la lógica: mapa_municipio_<municipio>_<variante>.html")
+    print("  (sin acentos: 'Río Hondo' -> 'Rio_Hondo')\n")
     print("  Variantes:")
     print("    ruta       Puntos del municipio + línea que los conecta")
     print("    puntos     Solo los marcadores del municipio, sin línea")

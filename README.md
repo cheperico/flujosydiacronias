@@ -272,7 +272,7 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/td/osc_probe.py` | Eco OSC: escucha lo que llega a un puerto y lo imprime (test rápido TD→Python) | Instalación |
 | `scripts/td/util_enter.py` | Helper compartido: `detener_con_enter()` devuelve un `threading.Event` (salida limpia con Enter) | Instalación |
 | `scripts/mapa_ruta.py` | Mapa interactivo con Folium: la línea usa el track GPX; los medios como marcadores. `--tolerancia-metros` reporta discrepancias media vs track | Visualización |
-| `scripts/mapas_municipio.py` | Un mapa HTML por municipio recorrido, con variantes (`ruta`, `puntos`, `contexto`, `gradiente`). La línea de `ruta`/`contexto`/`gradiente` usa el tramo del track GPX del municipio. `--mode skip` genera solo los faltantes; `--mode update` regenera todos. Nombre: `mapa_municipio_<municipio>_<variante>.html` | Visualización |
+| `scripts/mapas_municipio.py` | Un mapa HTML por municipio recorrido, con variantes (`ruta`, `puntos`, `contexto`, `gradiente`). La línea de `ruta`/`contexto`/`gradiente` usa el tramo del track GPX del municipio. `--mode skip` genera solo los faltantes; `--mode update` regenera todos. Nombre: `mapa_municipio_<municipio>_<variante>.html` (slug ASCII, sin acentos: `'Río Hondo'`→`Rio_Hondo`) | Visualización |
 | `scripts/track_gpx.py` | Helpers de tracks GPX: cargar, interpolar, tramo temporal, haversine, discrepancias media vs track | Visualización |
 | `scripts/check_db.py` | Inspección de la DB | Consulta |
 | `scripts/check_gps.py` | Verifica GPS en archivos via ExifTool | Consulta |

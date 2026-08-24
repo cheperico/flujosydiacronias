@@ -9,10 +9,14 @@ cada municipio toma el tramo del track cuyo tiempo cae dentro del rango
 [min, max] de timestamps de sus medios (los medios quedan como marcadores).
 El nombre del archivo sigue la lógica:
 
-    mapa_municipio_<municipio>_<variante>.html
+    mapa_municipio_<slug>_<variante>.html
 
-donde <municipio> lleva los espacios reemplazados por guion bajo (conservando
-acentos) y <variante> es uno de:
+donde <slug> es el municipio normalizado a ASCII: sin acentos ni símbolos
+(tildes, diéresis y ñ→n), con los espacios reemplazados por guion bajo y las
+mayúsculas originales conservadas (ej: 'Río Hondo' → 'Rio_Hondo',
+'Jesús María' → 'Jesus_Maria', 'Melincué' → 'Melincue'). Los nombres sin
+acentos no cambian ('Bell Ville' → 'Bell_Ville'). Esta convención ASCII
+evita problemas de visualización en TouchDesigner. <variante> es uno de:
 
     ruta      Puntos del municipio + tramo del track que los conecta
     puntos    Solo los marcadores del municipio, sin línea
@@ -30,10 +34,12 @@ Uso:
 """
 
 import argparse
+import json
 import logging
 import os
 import sqlite3
 import sys
+import unicodedata
 from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
@@ -111,14 +117,38 @@ DESTACADO_COLOR = "#cc3333"     # puntos del municipio destacados
 # Sanitización del nombre
 # ---------------------------------------------------------------------------
 
-def _nombre_archivo(municipio: str, variante: str) -> str:
-    """Genera el nombre del archivo: mapa_municipio_<municipio>_<variante>.html.
+def _slug_municipio(nombre: str) -> str:
+    """Convierte un nombre de municipio a slug ASCII (sin acentos ni símbolos).
 
-    El municipio lleva los espacios reemplazados por guion bajo, conservando
-    los acentos (ej: 'Ojo de Agua' → 'Ojo_de_Agua', 'Melincué' → 'Melincué').
+    Normaliza a NFD (descompone las vocales acentuadas y la ñ), elimina las
+    marcas combinantes (tildes, diéresis, virgulilla), reemplaza los espacios
+    por guion bajo y descarta cualquier símbolo no alfanumérico. Conserva las
+    mayúsculas originales.
+
+    Ejemplos:
+        'Río Hondo'           → 'Rio_Hondo'
+        'Jesús María'         → 'Jesus_Maria'
+        'Melincué'            → 'Melincue'
+        'Chañar Ladeado'      → 'Chanar_Ladeado'
+        'San Andrés de Giles' → 'San_Andres_de_Giles'
     """
-    municipio_limpio = municipio.replace(" ", "_")
-    return f"mapa_municipio_{municipio_limpio}_{variante}.html"
+    nfkd = unicodedata.normalize("NFD", nombre or "")
+    sin_diacriticos = "".join(c for c in nfkd if unicodedata.combining(c) == 0)
+    return "".join(
+        c if c.isalnum() else "_" if c == " " else ""
+        for c in sin_diacriticos
+    ).strip("_")
+
+
+def _nombre_archivo(municipio: str, variante: str) -> str:
+    """Genera el nombre del archivo: mapa_municipio_<slug>_<variante>.html.
+
+    El municipio se convierte a slug ASCII sin acentos ni símbolos, con los
+    espacios reemplazados por guion bajo (ej: 'Ojo de Agua' → 'Ojo_de_Agua',
+    'Río Hondo' → 'Rio_Hondo', 'Melincué' → 'Melincue'). Los nombres sin
+    acentos no cambian ('Bell Ville' → 'Bell_Ville').
+    """
+    return f"mapa_municipio_{_slug_municipio(municipio)}_{variante}.html"
 
 
 def _parse_timestamp(ts: str | None) -> datetime | None:
@@ -144,26 +174,29 @@ def leer_puntos_por_municipio(conn: sqlite3.Connection) -> dict[str, list[dict]]
     Returns:
         Dict: municipio → lista de dicts con id, filename, lat, lon, timestamp,
         provincia, departamento, municipio, distancia_m, gradiente,
-        cumul_dist_m, altitud.
+        cumul_dist_m, altitud, max_gap_s.
     """
     rows = conn.execute("""
         SELECT
-            id,
-            filename_original,
-            latitude,
-            longitude,
-            timestamp_utc,
-            provincia,
-            departamento,
-            municipio,
-            distance_from_prev_m,
-            gradient_pct,
-            cumul_distance_m,
-            altitude
-        FROM media
-        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-          AND municipio IS NOT NULL AND municipio != ''
-        ORDER BY municipio, timestamp_utc ASC
+            m.id,
+            m.filename_original,
+            m.latitude,
+            m.longitude,
+            m.timestamp_utc,
+            m.provincia,
+            m.departamento,
+            m.municipio,
+            m.distance_from_prev_m,
+            m.gradient_pct,
+            m.cumul_distance_m,
+            m.altitude,
+            mm.value AS gaps_json
+        FROM media m
+        LEFT JOIN media_metadata mm
+            ON mm.media_id = m.id AND mm.key = 'ubicacion_video_gaps'
+        WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL
+          AND m.municipio IS NOT NULL AND m.municipio != ''
+        ORDER BY m.municipio, m.timestamp_utc ASC
     """).fetchall()
 
     puntos_por_municipio: dict[str, list[dict]] = {}
@@ -182,8 +215,22 @@ def leer_puntos_por_municipio(conn: sqlite3.Connection) -> dict[str, list[dict]]
             "gradiente": row[9],
             "cumul_dist_m": row[10],
             "altitud": row[11],
+            "max_gap_s": _max_gap_s(row[12]),
         })
     return puntos_por_municipio
+
+
+def _max_gap_s(gaps_json: str | None) -> float | None:
+    """Máximo gap (segundos) desde el JSON de ubicacion_video_gaps."""
+    if not gaps_json:
+        return None
+    try:
+        gaps = json.loads(gaps_json)
+    except (ValueError, TypeError):
+        return None
+    if not gaps:
+        return None
+    return max(g["gap_s"] for g in gaps)
 
 
 # ---------------------------------------------------------------------------
@@ -206,39 +253,53 @@ def _crear_mapa_base(lats: list, lons: list) -> folium.Map:
     return m
 
 
-def _agregar_marcadores_basicos(mapa, puntos: list[dict]):
-    """Agrega marcadores inicio (verde) / fin (rojo) / intermedios (azul)."""
+def _agregar_marcadores_basicos(mapa, puntos: list[dict], umbral_gap_aviso: float = 1800):
+    """Agrega marcadores inicio (verde) / fin (rojo) / intermedios (azul).
+
+    Los medios con gap del track >= umbral_gap_aviso se marcan en naranja
+    (posición incierta) y su popup muestra el aviso.
+    """
     if not puntos:
         return
+
+    def _tiene_gap(p: dict) -> bool:
+        return (p.get("max_gap_s") or 0) >= umbral_gap_aviso
+
     # Inicio
     p = puntos[0]
+    color = "orange" if _tiene_gap(p) else "green"
     folium.Marker(
         location=[p["lat"], p["lon"]],
-        popup=folium.Popup(_crear_popup(p, es_inicio=True), max_width=350),
+        popup=folium.Popup(_crear_popup(p, es_inicio=True, umbral_gap_aviso=umbral_gap_aviso),
+                           max_width=350),
         tooltip=f"🏁 Inicio: {p.get('filename', '')}",
-        icon=folium.Icon(color="green", icon="play", prefix="fa"),
+        icon=folium.Icon(color=color, icon="play", prefix="fa"),
     ).add_to(mapa)
     # Fin
     if len(puntos) > 1:
         p = puntos[-1]
+        color = "orange" if _tiene_gap(p) else "red"
         folium.Marker(
             location=[p["lat"], p["lon"]],
-            popup=folium.Popup(_crear_popup(p, es_fin=True), max_width=350),
+            popup=folium.Popup(_crear_popup(p, es_fin=True, umbral_gap_aviso=umbral_gap_aviso),
+                               max_width=350),
             tooltip=f"🏁 Fin: {p.get('filename', '')}",
-            icon=folium.Icon(color="red", icon="stop", prefix="fa"),
+            icon=folium.Icon(color=color, icon="stop", prefix="fa"),
         ).add_to(mapa)
     # Intermedios
     for i in range(1, len(puntos) - 1):
         p = puntos[i]
+        color = "orange" if _tiene_gap(p) else "blue"
         folium.Marker(
             location=[p["lat"], p["lon"]],
-            popup=folium.Popup(_crear_popup(p), max_width=350),
+            popup=folium.Popup(_crear_popup(p, umbral_gap_aviso=umbral_gap_aviso), max_width=350),
             tooltip=p.get("filename", f"Punto {i}"),
-            icon=folium.Icon(color="blue", icon="info-sign", prefix="glyphicon"),
+            icon=folium.Icon(color=color, icon="info-sign", prefix="glyphicon"),
         ).add_to(mapa)
 
 
-def _variante_ruta(puntos: list[dict], tramo_track: list[tuple] | None = None) -> folium.Map:
+def _variante_ruta(puntos: list[dict], tramo_track: list[tuple] | None = None,
+                   umbral_gap_aviso: float = 1800) -> folium.Map:
     """Puntos del municipio + tramo del track GPX que los conecta (si hay)."""
     lats = [p["lat"] for p in puntos]
     lons = [p["lon"] for p in puntos]
@@ -264,22 +325,23 @@ def _variante_ruta(puntos: list[dict], tramo_track: list[tuple] | None = None) -
             tooltip=f"Ruta — {len(puntos)} puntos",
         ).add_to(m)
 
-    _agregar_marcadores_basicos(m, puntos)
+    _agregar_marcadores_basicos(m, puntos, umbral_gap_aviso)
     return m
 
 
-def _variante_puntos(puntos: list[dict]) -> folium.Map:
+def _variante_puntos(puntos: list[dict], umbral_gap_aviso: float = 1800) -> folium.Map:
     """Solo los marcadores del municipio, sin línea."""
     lats = [p["lat"] for p in puntos]
     lons = [p["lon"] for p in puntos]
     m = _crear_mapa_base(lats, lons)
-    _agregar_marcadores_basicos(m, puntos)
+    _agregar_marcadores_basicos(m, puntos, umbral_gap_aviso)
     return m
 
 
 def _variante_contexto(
     puntos_municipio: list[dict],
     track_completo: list[tuple] | None = None,
+    umbral_gap_aviso: float = 1800,
 ) -> folium.Map:
     """Puntos del municipio destacados sobre la ruta completa del track (gris)."""
     lats = [p["lat"] for p in puntos_municipio]
@@ -310,16 +372,17 @@ def _variante_contexto(
             fill=True,
             fill_color=DESTACADO_COLOR,
             fill_opacity=0.8,
-            popup=folium.Popup(_crear_popup(p), max_width=350),
+            popup=folium.Popup(_crear_popup(p, umbral_gap_aviso=umbral_gap_aviso), max_width=350),
             tooltip=p.get("filename", ""),
         ).add_to(m)
 
     # Marcadores inicio/fin del municipio destacados
-    _agregar_marcadores_basicos(m, puntos_municipio)
+    _agregar_marcadores_basicos(m, puntos_municipio, umbral_gap_aviso)
     return m
 
 
-def _variante_gradiente(puntos: list[dict], tramo_track: list[tuple] | None = None) -> folium.Map:
+def _variante_gradiente(puntos: list[dict], tramo_track: list[tuple] | None = None,
+                        umbral_gap_aviso: float = 1800) -> folium.Map:
     """Segmentos coloreados por pendiente (del tramo del track si hay) + leyenda."""
     lats = [p["lat"] for p in puntos]
     lons = [p["lon"] for p in puntos]
@@ -373,16 +436,16 @@ def _variante_gradiente(puntos: list[dict], tramo_track: list[tuple] | None = No
             ).add_to(m)
         _agregar_leyenda_gradiente(m)
 
-    _agregar_marcadores_basicos(m, puntos)
+    _agregar_marcadores_basicos(m, puntos, umbral_gap_aviso)
     return m
 
 
-# Generadores por variante (reciben puntos, tramo del track y track completo)
+# Generadores por variante (reciben puntos, tramo del track, track completo y umbral gap)
 _GENERADORES = {
-    "ruta": lambda puntos, tramo, completo: _variante_ruta(puntos, tramo),
-    "puntos": lambda puntos, tramo, completo: _variante_puntos(puntos),
-    "contexto": lambda puntos, tramo, completo: _variante_contexto(puntos, completo),
-    "gradiente": lambda puntos, tramo, completo: _variante_gradiente(puntos, tramo),
+    "ruta": lambda puntos, tramo, completo, umbral: _variante_ruta(puntos, tramo, umbral),
+    "puntos": lambda puntos, tramo, completo, umbral: _variante_puntos(puntos, umbral),
+    "contexto": lambda puntos, tramo, completo, umbral: _variante_contexto(puntos, completo, umbral),
+    "gradiente": lambda puntos, tramo, completo, umbral: _variante_gradiente(puntos, tramo, umbral),
 }
 
 
@@ -398,6 +461,7 @@ def generar_mapas(
     dry_run: bool = False,
     tolerancia_metros: int = 1000,
     mode: str = "update",
+    umbral_gap_aviso: float = 1800,
 ) -> dict:
     """Genera los mapas por municipio y devuelve estadísticas.
 
@@ -408,6 +472,8 @@ def generar_mapas(
     Args:
         mode: 'update' (default) regenera todos los mapas; 'skip' solo genera
             los archivos que no existen en output_dir (los existentes se saltan).
+        umbral_gap_aviso: gap del track (s) a partir del cual un medio se marca
+            como "posición incierta" en su marcador/popup (default 1800).
 
     Returns:
         Dict con: total_municipios, total_archivos, generados, saltados, errores.
@@ -515,7 +581,7 @@ def generar_mapas(
                 continue
             try:
                 generador = _GENERADORES[var]
-                mapa = generador(puntos, tramo, track_completo)
+                mapa = generador(puntos, tramo, track_completo, umbral_gap_aviso)
                 mapa.save(ruta)
                 generados += 1
                 log.info("Generado: %s (%d puntos, tramo track: %d)",
@@ -592,6 +658,12 @@ Ejemplos:
         default=1000,
         help="Tolerancia (m) para reportar discrepancias media vs track (default: 1000)",
     )
+    parser.add_argument(
+        "--umbral-gap-aviso",
+        type=float,
+        default=1800,
+        help="Gap del track (s) a partir del cual un medio se marca como posición incierta (default: 1800)",
+    )
     args = parser.parse_args(argv)
 
     # Resolver ruta de DB
@@ -628,6 +700,7 @@ Ejemplos:
         dry_run=args.dry_run,
         tolerancia_metros=args.tolerancia_metros,
         mode=args.mode,
+        umbral_gap_aviso=args.umbral_gap_aviso,
     )
 
     if resultado["generados"] > 0:

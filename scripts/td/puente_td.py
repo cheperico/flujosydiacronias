@@ -24,6 +24,7 @@ import logging
 import sqlite3
 import threading
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -342,30 +343,44 @@ def _consultar_mensajes_telegram(
 # 'ruta' = puntos del municipio + línea que los conecta.
 VARIANTE_MAPA_MUNICIPIO = "ruta"
 
-# Plantilla de la ruta del mapa de cada municipio, consistente con el nombre de
-# archivo que genera `scripts/mapas_municipio.py` (`_nombre_archivo`):
-#   mapas/mapa_municipio_<municipio con espacios→_>_<variante>.html
-# El puente NO genera los mapas; solo construye la ruta del archivo (relativa a
-# la raíz del proyecto) que ya existe o que se espera que exista.
+# Plantilla de la ruta (RELATIVA a la raíz del proyecto) del mapa de cada
+# municipio, consistente con el nombre de archivo que genera
+# `scripts/mapas_municipio.py` (`_nombre_archivo`):
+#   mapas/mapa_municipio_<slug>_<variante>.html
+# donde <slug> es el municipio normalizado a ASCII (sin acentos ni símbolos,
+# espacios→_; ej: 'Río Hondo' -> 'Rio_Hondo'). Esta convención ASCII evita
+# problemas de visualización en TouchDesigner.
+# El puente NO genera los mapas; solo construye la ruta del archivo.
 PLANTILLA_MAPA_MUNICIPIO = "mapas/mapa_municipio_{slug}_{variante}.html"
 
 
 def _slug_municipio(nombre: str) -> str:
     """Convierte el nombre de un municipio al formato usado en el archivo.
 
-    Igual que `mapas_municipio.py::_nombre_archivo`: reemplaza los espacios por
-    guion bajo y conserva los acentos (ej: 'Bell Ville' -> 'Bell_Ville',
-    'Río Hondo' -> 'Río_Hondo').
+    Igual que `mapas_municipio.py::_slug_municipio`: normaliza a NFD (elimina
+    tildes, diéresis y la virgulilla de la ñ), reemplaza los espacios por guion
+    bajo y descarta símbolos no alfanuméricos. Conserva las mayúsculas.
+    Ejemplos: 'Bell Ville' -> 'Bell_Ville', 'Río Hondo' -> 'Rio_Hondo'.
     """
-    return str(nombre).strip().replace(" ", "_")
+    nfkd = unicodedata.normalize("NFD", str(nombre or ""))
+    sin_diacriticos = "".join(c for c in nfkd if unicodedata.combining(c) == 0)
+    return "".join(
+        c if c.isalnum() else "_" if c == " " else ""
+        for c in sin_diacriticos
+    ).strip("_")
 
 
 def _ruta_mapa_municipio(nombre: str) -> str:
-    """Ruta (relativa a la raíz del proyecto) del mapa HTML de un municipio."""
-    return PLANTILLA_MAPA_MUNICIPIO.format(
+    """Ruta ABSOLUTA al mapa HTML de un municipio.
+
+    La ruta que se envía por OSC es la completa (raíz del proyecto + archivo),
+    porque TD/Web Render necesita la ruta absoluta para cargar el archivo.
+    """
+    relativa = PLANTILLA_MAPA_MUNICIPIO.format(
         slug=_slug_municipio(nombre),
         variante=VARIANTE_MAPA_MUNICIPIO,
     )
+    return str(Path(__file__).resolve().parents[2] / relativa)
 
 
 def _procesar_rafaga(
@@ -408,7 +423,7 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
          municipio(s). Cada mensaje lleva su hora local (UTC-3) para que TD lo
          sincronice con la hora que corre en el loop (mismo criterio que la web).
       6. `/flujos/fluir/mapa <municipio> <ruta>` — uno por municipio elegido,
-         SOLO si el visitante eligió municipio(s). `ruta` es la ruta relativa al
+         SOLO si el visitante eligió municipio(s). `ruta` es la ruta ABSOLUTA al
          mapa HTML del municipio (generado por `scripts/mapas_municipio.py`,
          variante 'ruta'); TD la guarda en `fluir_mapas` para renderizarla.
       7. `/flujos/fluir/fin <total>` — marca de finalización.

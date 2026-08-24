@@ -190,8 +190,9 @@ Etapa 5: INSTALACIÓN          →  TouchDesigner + motor de deriva
     variantes: `ruta` (puntos + línea), `puntos` (solo marcadores), `contexto`
     (puntos destacados sobre la ruta completa en gris) y `gradiente` (segmentos
     por pendiente + leyenda). Reutiliza helpers de `mapa_ruta.py` (Folium).
-  - Nombre de archivo: `mapa_municipio_<municipio>_<variante>.html` (espacios→`_`,
-    conserva acentos: `mapa_municipio_Melincué_ruta.html`). Salida en `mapas/`.
+  - Nombre de archivo: `mapa_municipio_<municipio>_<variante>.html` (slug ASCII
+    sin acentos: espacios→`_`, `'Río Hondo'`→`Rio_Hondo`, `mapa_municipio_Rio_Hondo_ruta.html`).
+    Salida en `mapas/`.
   - CLI: `flujos.py mapa-municipios` (alias `mapas`); TUI: Visualizaciones→2.
     Args: `--variantes`, `--municipio` (substring), `--output`, `--db`, `--dry-run`.
   - Verificado: 74 municipios × 4 variantes = 296 archivos, 0 errores (~16 s).
@@ -216,6 +217,22 @@ Etapa 5: INSTALACIÓN          →  TouchDesigner + motor de deriva
     genera solo los faltantes en disco (los existentes se saltan). En la TUI se pregunta
     `?Generar solo los que faltan?` con default Sí, y las variantes se confirman con
     default Sí (`S/n`).
+
+- **2026-08-24:** **Gaps del track: no fabricar posiciones falsas + aviso en mapas.**
+  - Problema real: el video `INSTA 5 ..._152.mp4` (id 1376, Colonia Caroya) mostraba en el
+    mapa un punto que no coincidía con el video. Causa: el track GPX tiene un **gap de 9110 s
+    (2.5 h)** (25-ago 00:40Z → 03:12Z) y el video arranca dentro de ese hueco. El script
+    interpolaba linealmente a través del gap y fabricaba una posición falsa (offset 0 =
+    `-31.405066,-64.212150`), que además quedaba etiquetada como "Fin" por ser el último
+    medio del municipio.
+  - Cambio en `ubicar_videos_gpx.py`: las muestras dentro de gaps > `--umbral-gap`
+    (default 1800 s = 30 min, antes 600 s solo flaggeaba) **no se emiten**; en
+    update/replace se limpia el GPS previo de track si el video queda sin cobertura.
+  - Aviso en los mapas: `--umbral-gap-aviso` (default 1800) marca en naranja los medios
+    con gap del track ≥ umbral y el popup avisa "posición incierta". Aplica a
+    `mapa_ruta.py` y `mapas_municipio.py`.
+  - Verificado: DB actualizada (1376 ahora con lat/lon real, 7 videos con GPS limpiado),
+    296/296 mapas regenerados.
 
 - **2026-08-16:** **Inferencia de hora de textos por interpolación en el track GPX.**
   - Los textos (`type='text'`) sin fecha solo obtienen su fecha/hora interpolando

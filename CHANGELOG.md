@@ -7,6 +7,37 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 40] — 2026-08-24
+
+### Cambiado
+- **Gaps del track: no fabricar posiciones falsas** (`scripts/ubicar_videos_gpx.py`): las muestras dentro de un hueco del track mayor que `--umbral-gap` (default **1800 s = 30 min**, antes 600 s que solo flaggeaba) ahora **NO se emiten** — la interpolación lineal a través del hueco producía una posición falsa (recta entre dos puntos del track separados por el gap).
+  - El video `INSTA 5 ..._152.mp4` (id 1376, Colonia Caroya, 25-ago) tenía un gap de **9110 s (2.5 h)** en su inicio: el offset 0 emitido era una posición falsa. Ahora sus keypoints empiezan en el primer punto con track real (offset 1230 s) y `media.lat/lon` pasó de la falsa `(-31.405066,-64.212150)` a la real `(-31.406933,-64.205973)`.
+  - **Limpieza de cobertura**: si un video queda sin ninguna posición válida (todo en gaps), en `--mode update/replace` se limpia su `media.latitude/longitude` previo de track (evita puntos ficticios). Resultado tras el update: 7 videos con GPS limpiado, 33 con ubicación, 361 keypoints.
+- **Aviso de gap en los mapas** (`scripts/mapa_ruta.py` + `scripts/mapas_municipio.py`): los medios con `ubicacion_video_gaps` cuyo máximo gap ≥ `--umbral-gap-aviso` (default 1800 s) se marcan en **naranja** y su popup muestra "⚠️ Posición incierta: el track GPX tiene un hueco de ~X h cerca del inicio del video". Nuevo flag `--umbral-gap-aviso` en ambos scripts.
+
+### Documentación
+- **AGENTS.md**: fila de `ubicar_videos_gpx.py` (regla de gaps, limpieza de GPS) y de los scripts de mapas (`--umbral-gap-aviso`).
+- **`docs/discrepancia_horarios_camaras.md`**: nota del caso del video `_152` (gap del track de 2.5 h en su inicio, posición interpolada falsa).
+
+---
+
+## [Entrega 39] — 2026-08-24
+
+### Cambiado
+- **Nombres de archivo de mapas por municipio sin acentos** (`scripts/mapas_municipio.py` + `scripts/td/puente_td.py`): los tildes/diéresis y la `ñ` complicaban la visualización de los HTML en TouchDesigner. El nombre ahora usa un **slug ASCII**: `mapa_municipio_<municipio>_<variante>.html` donde el municipio se normaliza a NFD (elimina tildes, diéresis y virgulilla de la ñ: `'Río Hondo'`→`Rio_Hondo`, `'Jesús María'`→`Jesus_Maria`, `'Melincué'`→`Melincue`), espacios→`_` y se descartan símbolos no alfanuméricos, conservando las mayúsculas. Los nombres sin acentos no cambian (`'Bell Ville'`→`Bell_Ville`).
+  - `mapas_municipio.py`: nuevo `_slug_municipio()` (la lógica vivía en `_nombre_archivo`), sin dependencias.
+  - `puente_td.py`: `_slug_municipio()` (línea 354) replicó la misma normalización para que la ruta que TD recibe por `/flujos/fluir/mapa` coincida **exactamente** con el archivo generado (requisito ya documentado en Entrega 37).
+  - **Migración**: regenerados los 296 mapas (74 municipios × 4 variantes) y eliminados los 104 HTML viejos con acentos de `mapas/`. Verificado: 0 nombres con caracteres no-ASCII, 0 divergencias entre los slugs del generador y del puente.
+
+### Documentación
+- **AGENTS.md**: fila de `mapas_municipio.py` con la nueva convención de slug (sin acentos, ejemplo `'Río Hondo'`→`Rio_Hondo`).
+- **README.md**: fila de `scripts/mapas_municipio.py` con la convención ASCII.
+- **ROADMAP.md**: entrada del historial actualizada al slug sin acentos.
+- **`docs/retorno_fluir_td.md`**: §contrato (bloque `/mapa`) y decisión nº 14 con el slug ASCII.
+- **`flujos.py`**: ayuda del CLI y menú TUI aclaran "sin acentos".
+
+---
+
 ## [Entrega 38] — 2026-08-17
 
 ### Añadido
@@ -30,7 +61,7 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 ## [Entrega 37] — 2026-08-18
 
 ### Añadido
-- **Rutas de mapas por municipio en el retorno "Fluir"** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat` + `td/crear_tablas_fluir.dat`): nueva tabla `fluir_mapas` en TD (`[municipio, ruta]`). Cuando el visitante elige municipio(s), el puente emite `/flujos/fluir/mapa <municipio> <ruta>` × municipios, con la ruta relativa al mapa HTML generado por `scripts/mapas_municipio.py`. La ruta coincide **exactamente** con `_nombre_archivo` del generador para la variante configurada (`VARIANTE_MAPA_MUNICIPIO`, default `ruta`): `mapas/mapa_municipio_<municipio>_<variante>.html` (espacios→`_`, acentos conservados). **El HTML no viaja por OSC** (evita el límite de tamaño del mensaje); TD guarda la ruta en `fluir_mapas` y decide cómo renderizarla (p. ej. Web Render TOP). Flag CLI `--no-enviar-mapas`. El callbacks la limpia al inicio de lote y **no cuenta en los `recibidos/esperados` del `/fin`** (valida medios del loop). Fase 2 pendiente: capas extra al mapa (marcadores por tags/colores), Web Render Source=DAT editable, sync con el loop.
+- **Rutas de mapas por municipio en el retorno "Fluir"** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat` + `td/crear_tablas_fluir.dat`): nueva tabla `fluir_mapas` en TD (`[municipio, ruta]`). Cuando el visitante elige municipio(s), el puente emite `/flujos/fluir/mapa <municipio> <ruta>` × municipios, con la ruta **absoluta** al mapa HTML generado por `scripts/mapas_municipio.py`. El nombre de archivo coincide **exactamente** con `_nombre_archivo` del generador para la variante configurada (`VARIANTE_MAPA_MUNICIPIO`, default `ruta`): `mapas/mapa_municipio_<municipio>_<variante>.html` (espacios→`_`, acentos conservados); la ruta completa = raíz del proyecto + ese archivo. **El HTML no viaja por OSC** (evita el límite de tamaño del mensaje); TD guarda la ruta en `fluir_mapas` y decide cómo renderizarla (p. ej. Web Render TOP). Flag CLI `--no-enviar-mapas`. El callbacks la limpia al inicio de lote y **no cuenta en los `recibidos/esperados` del `/fin`** (valida medios del loop). Fase 2 pendiente: capas extra al mapa (marcadores por tags/colores), Web Render Source=DAT editable, sync con el loop.
 
 ### Cambiado
 - **TUI Visualizaciones reestructurada**: nueva opción 1 "Mapas" que agrupa en un submenú "Mapa de ruta" y "Mapas por municipio"; el menú queda: 1 Mapas, 2 Exportar visualización web (deploy), 3 TouchDesigner (puente OSC). Árbol del README sincronizado (faltaba listar "Mapas por municipio") y columnas TUI del catálogo en AGENTS.md actualizadas.

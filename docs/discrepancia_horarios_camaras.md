@@ -53,6 +53,14 @@ La cámara se identifica por **bitrate + fps + offset de reloj** (los videos 360
 
 **Caso ambiguo**: `INSTA 5 - 8-25_...VID_20250824_195218_00_152.mp4` tiene offset de A (+7.0 h) pero 50 Mbps (bitrate de B). Es el único archivo con prefijo "INSTA 5" en la carpeta.
 
+> **Lección 2026-08-24 (gap del track en este video)**: el video `_152` (hora real 23:52 local
+> del 24-ago = 02:52Z del 25-ago) arranca **dentro de un gap del track GPX de 9110 s (2.5 h)**
+> (25-ago 00:40Z → 03:12Z). La interpolación lineal a través del hueco fabricaba una posición
+> falsa para el inicio del video. `ubicar_videos_gpx.py` ahora **no emite** muestras dentro de
+> gaps > `--umbral-gap` (default 1800 s = 30 min) y los mapas marcan esos medios como
+> "posición incierta" (`--umbral-gap-aviso`). O sea: un timestamp correcto + un track con
+> hueco = posición interpolada no confiable → se omite en vez de inventarla.
+
 ---
 
 ## 3. Anomalías detectadas

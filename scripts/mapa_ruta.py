@@ -18,6 +18,7 @@ Uso:
 """
 
 import argparse
+import json
 import logging
 import math
 import os
@@ -133,25 +134,28 @@ def leer_puntos_gps(conn: sqlite3.Connection) -> list[dict]:
     Returns:
         Lista de dicts con: id, filename_original, lat, lon, timestamp_utc,
         provincia, departamento, municipio, distancia, gradiente,
-        cumul_distancia, altitud.
+        cumul_distancia, altitud, max_gap_s.
     """
     rows = conn.execute("""
         SELECT
-            id,
-            filename_original,
-            latitude,
-            longitude,
-            timestamp_utc,
-            provincia,
-            departamento,
-            municipio,
-            distance_from_prev_m,
-            gradient_pct,
-            cumul_distance_m,
-            altitude
-        FROM media
-        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-        ORDER BY timestamp_utc ASC
+            m.id,
+            m.filename_original,
+            m.latitude,
+            m.longitude,
+            m.timestamp_utc,
+            m.provincia,
+            m.departamento,
+            m.municipio,
+            m.distance_from_prev_m,
+            m.gradient_pct,
+            m.cumul_distance_m,
+            m.altitude,
+            mm.value AS gaps_json
+        FROM media m
+        LEFT JOIN media_metadata mm
+            ON mm.media_id = m.id AND mm.key = 'ubicacion_video_gaps'
+        WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL
+        ORDER BY m.timestamp_utc ASC
     """).fetchall()
 
     puntos = []
@@ -169,8 +173,22 @@ def leer_puntos_gps(conn: sqlite3.Connection) -> list[dict]:
             "gradiente": row[9],         # gradient_pct
             "cumul_dist_m": row[10],     # cumul_distance_m
             "altitud": row[11],          # altitude
+            "max_gap_s": _max_gap_s(row[12]),
         })
     return puntos
+
+
+def _max_gap_s(gaps_json: str | None) -> float | None:
+    """Máximo gap (segundos) desde el JSON de ubicacion_video_gaps."""
+    if not gaps_json:
+        return None
+    try:
+        gaps = json.loads(gaps_json)
+    except (ValueError, TypeError):
+        return None
+    if not gaps:
+        return None
+    return max(g["gap_s"] for g in gaps)
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +201,7 @@ def generar_mapa(
     markers: bool = True,
     road_colors: bool = False,
     tolerancia_metros: int = 1000,
+    umbral_gap_aviso: float = 1800,
 ) -> str:
     """
     Genera un mapa HTML interactivo con Folium desde la base de datos.
@@ -198,6 +217,8 @@ def generar_mapa(
         road_colors: Si True, colorea los segmentos de ruta según el gradiente.
         tolerancia_metros: Tolerancia (m) para reportar discrepancias entre el
             GPS embebido de los medios (metadata/manual) y el track interpolado.
+        umbral_gap_aviso: A partir de qué gap del track (s) se marca un medio
+            como "posición incierta" en su popup y marcador (default 1800).
     Returns:
         Ruta absoluta del archivo HTML generado, o None si no hay datos.
 
@@ -320,7 +341,7 @@ def generar_mapa(
 
     # ---- Agregar marcadores (medios) ----
     if markers:
-        _agregar_marcadores(m, puntos)
+        _agregar_marcadores(m, puntos, umbral_gap_aviso=umbral_gap_aviso)
 
     # ---- Guardar ----
     output_abs = os.path.abspath(output)
@@ -381,46 +402,68 @@ def _agregar_ruta_road_colors_track(mapa, track_puntos: list[tuple]):
 # Marcadores con popups
 # ---------------------------------------------------------------------------
 
-def _agregar_marcadores(mapa, puntos: list[dict]):
+def _agregar_marcadores(mapa, puntos: list[dict], umbral_gap_aviso: float = 1800):
     """Agrega marcadores a cada punto GPS con popup informativo."""
+    def _tiene_gap(p: dict) -> bool:
+        return (p.get("max_gap_s") or 0) >= umbral_gap_aviso
+
     # Agregar marcador de inicio (verde) con icono especial
     if puntos:
         p = puntos[0]
-        popup_html = _crear_popup(p, es_inicio=True)
+        popup_html = _crear_popup(p, es_inicio=True, umbral_gap_aviso=umbral_gap_aviso)
+        color = "orange" if _tiene_gap(p) else "green"
         folium.Marker(
             location=[p["lat"], p["lon"]],
             popup=folium.Popup(popup_html, max_width=350),
             tooltip=f"🏁 Inicio: {p.get('filename', '')}",
-            icon=folium.Icon(color="green", icon="play", prefix="fa"),
+            icon=folium.Icon(color=color, icon="play", prefix="fa"),
         ).add_to(mapa)
 
     # Agregar marcador de fin (rojo) con icono especial
     if len(puntos) > 1:
         p = puntos[-1]
-        popup_html = _crear_popup(p, es_fin=True)
+        popup_html = _crear_popup(p, es_fin=True, umbral_gap_aviso=umbral_gap_aviso)
+        color = "orange" if _tiene_gap(p) else "red"
         folium.Marker(
             location=[p["lat"], p["lon"]],
             popup=folium.Popup(popup_html, max_width=350),
             tooltip=f"🏁 Fin: {p.get('filename', '')}",
-            icon=folium.Icon(color="red", icon="stop", prefix="fa"),
+            icon=folium.Icon(color=color, icon="stop", prefix="fa"),
         ).add_to(mapa)
 
-    # Marcadores intermedios (azules, más pequeños)
+    # Marcadores intermedios (azules, más pequeños; naranja si hay gap)
     for i in range(1, len(puntos) - 1):
         p = puntos[i]
-        popup_html = _crear_popup(p)
+        popup_html = _crear_popup(p, umbral_gap_aviso=umbral_gap_aviso)
+        color = "orange" if _tiene_gap(p) else "blue"
         folium.Marker(
             location=[p["lat"], p["lon"]],
             popup=folium.Popup(popup_html, max_width=350),
             tooltip=p.get("filename", f"Punto {i}"),
-            icon=folium.Icon(color="blue", icon="info-sign", prefix="glyphicon"),
+            icon=folium.Icon(color=color, icon="info-sign", prefix="glyphicon"),
         ).add_to(mapa)
 
     log.info("Agregados %d marcadores (inicio: verde, fin: rojo, intermedios: azul).",
              len(puntos))
 
 
-def _crear_popup(punto: dict, es_inicio: bool = False, es_fin: bool = False) -> str:
+def _aviso_gap_html(max_gap_s: float | None, umbral_gap_aviso: float = 1800) -> str:
+    """HTML de aviso de posición incierta por gap del track (o vacío)."""
+    if not max_gap_s or max_gap_s < umbral_gap_aviso:
+        return ""
+    horas = max_gap_s / 3600.0
+    texto = f"~{horas:.1f} h" if horas >= 1 else f"~{max_gap_s/60:.0f} min"
+    return f"""
+    <div style="background:#fff3cd; border:1px solid #ffc107; color:#856404;
+                padding:6px 8px; border-radius:4px; margin-top:6px; font-size:12px;">
+        ⚠️ <b>Posición incierta:</b> el track GPX tiene un hueco de {texto} cerca
+        del inicio de este video. La posición se interpoló entre puntos separados
+        por ese gap.
+    </div>"""
+
+
+def _crear_popup(punto: dict, es_inicio: bool = False, es_fin: bool = False,
+                 umbral_gap_aviso: float = 1800) -> str:
     """Crea el HTML del popup para un punto GPS."""
     lat = punto["lat"]
     lon = punto["lon"]
@@ -447,6 +490,9 @@ def _crear_popup(punto: dict, es_inicio: bool = False, es_fin: bool = False) -> 
     # Título
     titulo = "🏁 INICIO" if es_inicio else ("🏁 FIN" if es_fin else f"Punto #{punto['id']}")
 
+    # Aviso de gap (posición incierta)
+    aviso = _aviso_gap_html(punto.get("max_gap_s"), umbral_gap_aviso)
+
     html = f"""
     <div style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; min-width: 260px;">
         <div style="font-weight: bold; font-size: 15px; margin-bottom: 6px;
@@ -471,6 +517,7 @@ def _crear_popup(punto: dict, es_inicio: bool = False, es_fin: bool = False) -> 
             <tr><td style="padding: 2px 6px 2px 0; color: #555;">Altitud</td>
                 <td style="padding: 2px 0;">{alt}</td></tr>
         </table>
+        {aviso}
     </div>
     """
     return html
@@ -576,6 +623,12 @@ Ejemplos:
         default=1000,
         help="Tolerancia (m) para reportar discrepancias media vs track (default: 1000)",
     )
+    parser.add_argument(
+        "--umbral-gap-aviso",
+        type=float,
+        default=1800,
+        help="Gap del track (s) a partir del cual un medio se marca como posición incierta (default: 1800)",
+    )
     args = parser.parse_args(argv)
 
     # Resolver ruta de DB
@@ -600,6 +653,7 @@ Ejemplos:
         markers=not args.no_markers,
         road_colors=args.road_colors,
         tolerancia_metros=args.tolerancia_metros,
+        umbral_gap_aviso=args.umbral_gap_aviso,
     )
 
     if resultado:
@@ -612,6 +666,7 @@ Ejemplos:
         log.info("  --no-markers          Sin marcadores")
         log.info("  --road-colors         Segmentos coloreados por pendiente")
         log.info("  --tolerancia-metros N Tolerancia para reportar discrepancias (default 1000)")
+        log.info("  --umbral-gap-aviso N  Gap del track (s) para marcar posición incierta (default 1800)")
         log.info("  --output PATH         Ruta de salida personalizada")
     else:
         log.error("No se pudo generar el mapa.")
