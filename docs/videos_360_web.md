@@ -101,10 +101,10 @@ WebGL custom queda como alternativa si se quiere cero dependencias absolutas.
 
 - **Opción elegida**: **A) Three.js local** (`deploy/js/three.min.js`, UMD 0.147,
   vendored, sin CDN ni build).
-- **Bloque "Videos 360°"** en el lienzo: lista de `subtipo='360'` filtrada por los
-  mismos chips que el resto de los medios; click → **visor fullscreen** (esfera
-  `BackSide` + `VideoTexture`, drag para mirar, rueda para zoom, auto-rotación en
-  reposo; al cerrar pausa y libera la escena).
+- **Bloque "Videos 360°"** en el lienzo: **reproduce el 360 en el propio bloque**
+  (visor embebido con Three.js, drag/zoom/auto-rotación, ◀ ▶ para cambiar entre
+  los filtrados por los chips). `medios_filtrados.php` solo devuelve los 360
+  cuyo archivo existe en `deploy/media/` (sin links rotos).
 - **`servir_medio.php`**: soporte HTTP Range (`206`/`416`, `Accept-Ranges`) →
   streaming y seek del `<video>`.
 - **`medios_filtrados.php`**: param `subtipo` (csv) para pedir solo los 360.

@@ -118,6 +118,10 @@ if ($tipoStr !== '') {
 
 $resultados = [];
 
+// El bloque 360 necesita más candidatos: después se filtran los que no tienen
+// archivo en media/ (serían links rotos en el visor).
+$limiteConsulta = in_array('360', $subtipos, true) ? 60 : $limite;
+
 foreach ($tipos as $tipo) {
     // WHERE dinámico: si hay filtros previos, concatenar con AND
     $whereTipo = ($where ? ' AND' : ' WHERE') . ' m.tipo = :tipo';
@@ -139,11 +143,23 @@ foreach ($tipos as $tipo) {
         $stmt->bindValue($k, $v, is_int($v) ? PDO::PARAM_INT : PDO::PARAM_STR);
     }
     $stmt->bindValue(':tipo', $tipo);
-    $stmt->bindValue(':limite', $limite, PDO::PARAM_INT);
+    $stmt->bindValue(':limite', $limiteConsulta, PDO::PARAM_INT);
     $stmt->execute();
     $filas = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $resultados[$tipo] = $filas;
+}
+
+// Disponibilidad web: para el bloque 360 solo se devuelven los videos cuyo
+// archivo existe en media/<carpeta>/<archivo> (los demás son links rotos).
+if (in_array('360', $subtipos, true) && isset($resultados['video'])) {
+    $disponibles = array_filter($resultados['video'], function ($m) {
+        $carpeta = str_replace('\\', '/', trim((string)$m['carpeta'], "/\\ \t\n\r\0\x0B"));
+        $archivo = (string)$m['archivo'];
+        if ($archivo === '') return false;
+        return file_exists(__DIR__ . '/../media/' . ($carpeta !== '' ? $carpeta . '/' : '') . $archivo);
+    });
+    $resultados['video'] = array_slice(array_values($disponibles), 0, $limite);
 }
 
 echo json_encode([

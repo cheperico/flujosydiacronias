@@ -144,13 +144,15 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 
 ## Videos 360° (bloque + visor)
 
-- **Bloque "Videos 360°"**: lista de los videos `subtipo='360'` filtrados por los
-  mismos chips (vía `medios_filtrados.php?tipo=video&subtipo=360`). Cada ítem con
-  badge **360°** + duración; click abre el **visor fullscreen**.
-- **Visor** (`app.js`): Three.js local (`js/three.min.js`, vendored, UMD 0.147).
-  Esfera `SphereGeometry` + `VideoTexture` + `BackSide`, cámara adentro; **drag**
-  para mirar, **rueda** para zoom (fov 30–110), auto-rotación en reposo; al
-  cerrar pausa el video y libera la escena.
+- **Bloque "Videos 360°"**: **reproduce el 360 en el propio bloque** (visor
+  embebido, no fullscreen): Three.js local (`js/three.min.js`, vendored, UMD
+  0.147) con esfera `SphereGeometry` + `VideoTexture` + `BackSide`, cámara
+  adentro; **drag** para mirar, **rueda** para zoom (fov 30–110), auto-rotación
+  en reposo. Barra con ◀ ▶ para cambiar de video (los filtrados por los chips,
+  vía `medios_filtrados.php?tipo=video&subtipo=360`). Al re-renderear el bloque
+  se detiene y libera la escena.
+- **Disponibilidad**: la API solo devuelve los 360 cuyo archivo existe en
+  `deploy/media/<carpeta>/` (evita links rotos; los demás quedan fuera).
 - **Reproducción**: `servir_medio.php` soporta HTTP Range (206/416) → streaming y seek.
 - **Contenido**: los 44 videos 360 (3840×1920, `subtype='360'` +
   `xmp_spherical=True`) se identifican por `subtipo='360'`. Requieren estar

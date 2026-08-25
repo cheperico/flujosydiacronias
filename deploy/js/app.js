@@ -1355,7 +1355,7 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    //  VIDEOS 360° — lista + visor Three.js
+    //  VIDEOS 360° — reproductor embebido + Three.js
     // ═══════════════════════════════════════════════════════
 
     function fmtDuracion(seg) {
@@ -1365,33 +1365,41 @@
     }
 
     function renderVideos360(cont) {
+        detenerVisor360();
         var items = (MEDIOS_360 && MEDIOS_360.resultados && MEDIOS_360.resultados.video)
                     ? MEDIOS_360.resultados.video : [];
         if (!items.length) {
             cont.innerHTML = '<div style="opacity:.2;font-size:.6rem;text-align:center;padding:.5rem">\u2014</div>';
             return;
         }
-        var html = '<div style="display:flex;flex-direction:column;gap:.2rem;width:100%;padding:.1rem 0">';
-        items.forEach(function(item) {
-            var nombre = item.archivo || '';
-            var desc = item.descripcion || '';
-            if (desc.length > 30) desc = desc.slice(0, 27) + '...';
-            var dur = fmtDuracion(item.duracion_seg);
-            html += '<button type="button" class="item-360" data-id="' + item.id + '" title="' + nombre + '">'
-                  + '<span class="badge-360">360\u00b0</span>'
-                  + '<span class="item-360-text">' + (desc || nombre) + '</span>'
-                  + (dur ? '<span class="item-360-dur">' + dur + '</span>' : '')
-                  + '</button>';
-        });
-        html += '</div>';
+        var html = '<div class="visor-360-bloque" style="flex:1;min-height:0;display:flex;flex-direction:column;width:100%;gap:.2rem;padding:.1rem 0">'
+                 + '<div class="visor-360-canvas" style="flex:1;min-height:0;position:relative;overflow:hidden;border-radius:3px;background:#000"></div>'
+                 + '<div class="visor-360-bar">'
+                 +   '<button type="button" class="visor-360-nav" data-dir="-1">&#9664;</button>'
+                 +   '<span class="visor-360-info"></span>'
+                 +   '<button type="button" class="visor-360-nav" data-dir="1">&#9654;</button>'
+                 + '</div>'
+                 + '<div class="visor-360-hint">Arrastr\u00e1 para mirar \u00b7 rueda para zoom</div>'
+                 + '</div>';
         cont.innerHTML = html;
-        cont.querySelectorAll('.item-360').forEach(function(btn) {
-            btn.addEventListener('click', function() { abrirVisor360(parseInt(this.dataset.id, 10)); });
-        });
+
+        var bar = cont.querySelector('.visor-360-bar');
+        if (bar) {
+            bar.querySelectorAll('.visor-360-nav').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var dir = parseInt(this.dataset.dir, 10) || 0;
+                    cambiarVideo360(dir);
+                });
+            });
+        }
+        iniciarVisor360(items, 0, cont);
     }
 
-    // ── Visor 360° fullscreen (Three.js) ──
+    // ── Visor 360° embebido (Three.js) ──
     var VISOR = {
+        items: null,
+        idx: 0,
+        cont: null,
         abierto: false,
         raf: 0,
         video: null,
@@ -1408,56 +1416,62 @@
         dragX: 0,
         dragY: 0,
         autoRotate: true,
-        _onResize: null,
         _onPointerDown: null,
         _onPointerMove: null,
         _onPointerUp: null,
         _onWheel: null
     };
 
-    function abrirVisor360(id) {
+    function cambiarVideo360(dir) {
+        if (!VISOR.items || !VISOR.items.length) return;
+        var nuevoIdx = (VISOR.idx + dir + VISOR.items.length) % VISOR.items.length;
+        iniciarVisor360(VISOR.items, nuevoIdx, VISOR.cont);
+    }
+
+    function iniciarVisor360(items, idx, cont) {
+        detenerVisor360();
         if (typeof THREE === 'undefined') {
-            console.warn('Three.js no cargado — visor 360\u00b0 no disponible');
+            cont.innerHTML = '<div style="opacity:.4;font-size:.55rem;text-align:center;padding:.5rem">Visor 360\u00b0 no disponible</div>';
             return;
         }
-        if (VISOR.abierto) cerrarVisor360();
 
-        // Buscar el item para el título
-        var titulo = '';
-        var items = (MEDIOS_360 && MEDIOS_360.resultados && MEDIOS_360.resultados.video) || [];
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].id === id) { titulo = items[i].archivo || items[i].descripcion || ''; break; }
+        VISOR.items = items;
+        VISOR.idx = idx;
+        VISOR.cont = cont;
+        VISOR.abierto = true;
+
+        var canvasCont = cont.querySelector('.visor-360-canvas');
+        if (!canvasCont) return;
+
+        // Actualizar info
+        var infoEl = cont.querySelector('.visor-360-info');
+        if (infoEl) {
+            infoEl.textContent = (idx + 1) + '/' + items.length + ' \u00b7 '
+                + (items[idx].archivo || items[idx].descripcion || '')
+                + (items[idx].duracion_seg ? ' \u00b7 ' + fmtDuracion(items[idx].duracion_seg) : '');
         }
 
-        // Crear overlay
-        var overlay = document.getElementById('visor-360');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'visor-360';
-            overlay.innerHTML = '<div class="visor-titulo"></div>'
-                              + '<button class="visor-close" type="button">\u2715</button>'
-                              + '<div class="visor-hint">Arrastr\u00e1 para mirar \u00b7 rueda para zoom</div>';
-            document.body.appendChild(overlay);
-        }
-        overlay.querySelector('.visor-titulo').textContent = titulo;
-        overlay.classList.add('visible');
-
-        // Cerrar
-        overlay.querySelector('.visor-close').onclick = function() { cerrarVisor360(); };
-
-        // Video element
+        // Crear elemento video embebido
         var video = document.createElement('video');
         video.loop = true;
         video.playsInline = true;
         video.muted = true;
         video.autoplay = true;
         video.preload = 'auto';
-        video.src = 'api/servir_medio.php?id=' + id;
+        video.src = 'api/servir_medio.php?id=' + items[idx].id;
         video.play().catch(function() {});
+        video.addEventListener('error', function() {
+            console.warn('video 360 no disponible', items[idx].id);
+            cambiarVideo360(1);
+        });
         VISOR.video = video;
 
-        // Three.js scene
-        var w = window.innerWidth, h = window.innerHeight;
+        // Dimensiones del contenedor embebido
+        var w = canvasCont.clientWidth;
+        var h = canvasCont.clientHeight;
+        if (w < 2 || h < 2) { w = canvasCont.offsetWidth || 400; h = canvasCont.offsetHeight || 300; }
+
+        // Escena Three.js
         var scene = new THREE.Scene();
         var camera = new THREE.PerspectiveCamera(75, w / h, 0.1, 10);
         camera.position.set(0, 0, 0);
@@ -1477,10 +1491,12 @@
         scene.add(sphere);
 
         var renderer = new THREE.WebGLRenderer();
-        renderer.setSize(w, h);
         renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(w, h);
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
         renderer.domElement.style.touchAction = 'none';
-        overlay.insertBefore(renderer.domElement, overlay.firstChild);
+        canvasCont.appendChild(renderer.domElement);
 
         VISOR.scene = scene;
         VISOR.camera = camera;
@@ -1488,7 +1504,6 @@
         VISOR.geometry = geometry;
         VISOR.material = material;
         VISOR.renderer = renderer;
-        VISOR.abierto = true;
 
         // ── Animación ──
         function animate() {
@@ -1539,20 +1554,9 @@
         }
         canvas.addEventListener('wheel', onWheel, { passive: false });
         VISOR._onWheel = onWheel;
-
-        // ── Resize ──
-        function onResize() {
-            if (!VISOR.abierto) return;
-            var w2 = window.innerWidth, h2 = window.innerHeight;
-            VISOR.camera.aspect = w2 / h2;
-            VISOR.camera.updateProjectionMatrix();
-            VISOR.renderer.setSize(w2, h2);
-        }
-        window.addEventListener('resize', onResize);
-        VISOR._onResize = onResize;
     }
 
-    function cerrarVisor360() {
+    function detenerVisor360() {
         if (!VISOR.abierto) return;
         cancelAnimationFrame(VISOR.raf);
         if (VISOR.video) {
@@ -1571,10 +1575,6 @@
         VISOR.scene = null;
         VISOR.camera = null;
         VISOR.sphere = null;
-        // Quitar listeners
-        if (VISOR._onResize) window.removeEventListener('resize', VISOR._onResize);
-        var overlay = document.getElementById('visor-360');
-        if (overlay) overlay.classList.remove('visible');
         VISOR.abierto = false;
         VISOR.yaw = 0;
         VISOR.pitch = 0;

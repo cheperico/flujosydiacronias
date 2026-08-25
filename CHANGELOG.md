@@ -10,7 +10,14 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 ## [Entrega 42] — 2026-08-25
 
 ### Añadido
-- **Bloque "Videos 360°" en el lienzo web** (`deploy/`): lista de videos `subtipo='360'` filtrada por los mismos chips (segundo fetch `tipo=video&subtipo=360` en `cargarMediosFiltrados`) y **visor fullscreen** con **Three.js local** (`deploy/js/three.min.js`, UMD 0.147, vendored). Esfera `SphereGeometry` + `VideoTexture` (`BackSide`), cámara en el centro; drag para mirar, rueda para zoom (fov 30–110), auto-rotación en reposo; al cerrar pausa el video y libera la escena. El bloque "Videos" regular excluye los 360.
+- **Bloque "Videos 360°" en el lienzo web** (`deploy/`): **reproduce el 360 en el
+  propio bloque** (visor embebido, no fullscreen) con **Three.js local**
+  (`deploy/js/three.min.js`, UMD 0.147, vendored). Esfera `SphereGeometry` +
+  `VideoTexture` (`BackSide`), cámara en el centro; drag para mirar, rueda para
+  zoom (fov 30–110), auto-rotación en reposo, barra ◀ ▶ para cambiar de video
+  entre los filtrados por los chips. Al re-renderear el bloque se detiene y
+  libera la escena. `medios_filtrados.php` solo devuelve los 360 cuyo archivo
+  existe en `deploy/media/` (sin links rotos).
 - **HTTP Range en `servir_medio.php`** (`206`/`416`, `Accept-Ranges`): streaming y seek para `<video>` (imprescindible para el visor 360).
 - **Filtros conectados a todos los medios**: `medios_filtrados.php` acepta `horas` (franja `[min,max]` en hora local Argentina UTC−3, convirtiendo el `hora` UTC del snapshot) y `subtipo` (csv). En `app.js` el fetch incluye `video`, los toggles recargan los medios **en vivo** (`cargarMediosFiltrados` en color/hora/provincia/municipio/tag) y el bloque Videos se re-renderiza.
 - **Fix hosting de rutas**: `servir_medio.php` resuelve como fallback `media/<carpeta>/<archivo>` (la DB snapshot-local guarda rutas absolutas de Windows que no existen en hosting → 404 de imágenes y audios; el fallback los sirve desde `deploy/media/`).
