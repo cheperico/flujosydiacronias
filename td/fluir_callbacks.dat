@@ -59,6 +59,12 @@ fluir_videos_360, audio -> fluir_sonidos, text -> fluir_textos.
 
 Este callbacks es INDEPENDIENTE del canal 9000/osc_in1 (nubes de elecciones):
 solo escribe las tablas `fluir_*`. No toca `elec_*` ni `osc_out1`.
+
+En el /fin, además, apunta el Web Render TOP `web_render_chat` a
+td/chat_fluir.html?t0=&loop_secs= (HTML autocontenido que genera el puente,
+`puente_td.py --generar-chat-html`) para mostrar el chat de Telegram
+sincronizado con la hora del loop; el canal OSC `/mensaje` → fluir_telegram
+queda intacto como respaldo/estado.
 """
 
 _ROOT = op("/project2")
@@ -446,7 +452,8 @@ def _recibir_fin(args):
     de filas de las 5 tablas por tipo y guarda received/esperados en
     fluir_estado para debug de pérdida UDP. Luego coteja (opcional) contra
     td/spec_fluir.json - que ya NO es fuente única de datos. Al final
-    completa los textos faltantes en fluir_textos desde el spec JSON.
+    completa los textos faltantes en fluir_textos desde el spec JSON y
+    recarga el Web Render del chat hacia td/chat_fluir.html.
     """
     global _tipo_actual
     tabla_estado = _tabla("fluir_estado")
@@ -478,6 +485,9 @@ def _recibir_fin(args):
     _cotejar_spec(recibido)
     _completar_textos_desde_spec()
 
+    # Chat de Telegram: recarga el Web Render hacia el HTML recién generado.
+    _recargar_chat()
+
 
 def _escribir_estado(tabla, clave, valor):
     """Agrega o actualiza una fila [clave, valor] en fluir_estado."""
@@ -487,6 +497,41 @@ def _escribir_estado(tabla, clave, valor):
             tabla[r, 1] = valor
             return
     tabla.appendRow([clave, valor])
+
+
+def _recargar_chat():
+    """Apunta el Web Render del chat al HTML recién generado y re-sincroniza su reloj.
+
+    En el /fin el lote está completo y el loop (fluir_loop) arranca en t=0. Se
+    re-escribe par.url de web_render_chat con ?t0=<epoch_ms>&loop_secs=<N>
+    (cache-buster + punto de arranque del reloj JS del chat, que vive en
+    td/chat_fluir.html, autocontenido: revela los mensajes según la hora local
+    que corre en el loop). Si el Web Render no existe, solo advierte.
+    """
+    wr = op("/project2").op("web_render_chat")
+    if wr is None:
+        print(f"{PREFIJO_LOG} Falta 'web_render_chat' (Web Render TOP); no se recarga el chat")
+        return
+
+    # loop_secs desde fluir_estado (nunca fijo 300)
+    loop_secs = 300.0
+    tabla = _tabla("fluir_estado")
+    if tabla is not None:
+        for r in range(1, tabla.numRows):
+            fila = tabla.row(r)
+            if fila and str(fila[0]).lower() == "loop_secs":
+                try:
+                    loop_secs = float(fila[1])
+                except (TypeError, ValueError):
+                    pass
+                break
+
+    import time as _time
+    t0 = int(_time.time() * 1000)
+    ruta = "{}/chat_fluir.html".format(project.folder)
+    url = "file:///{}?t0={}&loop_secs={}".format(ruta.replace("\\", "/"), t0, loop_secs)
+    wr.par.url = url
+    print(f"{PREFIJO_LOG} Chat: web_render_chat -> {url}")
 
 
 # ----------------------------------------------------------------- Spec JSON

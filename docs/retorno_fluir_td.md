@@ -47,10 +47,12 @@ Python: puente_td.py modo fluir
    │   └── osc_in2_callbacks  ◄── File: td/fluir_callbacks.dat (Sync to File ON)
    │           ├─ /resumen → fluir_estado     (total, loop_secs, image, video, video360, audio, text, telegram)
    │           ├─ /tabla+/medio (+/texto si type='text') → fluir_fotos / fluir_videos / fluir_videos_360 / fluir_sonidos / fluir_textos
-   │           ├─ /chiche → fluir_chiches
-   │           ├─ /mensaje → fluir_telegram   (chat de Telegram de los municipios elegidos)
-   │           ├─ /mapa → fluir_mapas         (ruta del mapa HTML de cada municipio elegido)
-   │           └─ /fin      → fluir_estado.fin=1 + cotejo y backfill de textos con td/spec_fluir.json
+│           ├─ /chiche → fluir_chiches
+    │           ├─ /mensaje → fluir_telegram   (chat de Telegram de los municipios elegidos)
+    │           ├─ /mapa → fluir_mapas         (ruta del mapa HTML de cada municipio elegido)
+    │           └─ /fin      → fluir_estado.fin=1 + cotejo y backfill de textos con td/spec_fluir.json
+    │                         + recarga web_render_chat (Web Render TOP) hacia
+    │                           td/chat_fluir.html?t0=&loop_secs= (chat HTML del lote)
    ▼
    (consumo, opcional según etapa visual)
    ├── fluir_estado      (Table DAT clave-valor: total, loop_secs, por tipo, fin, recibidos/esperados)
@@ -831,6 +833,15 @@ parsear código dentro de los operadores de renderizado.
 | `fluir_telegram` | Table DAT | `id`, `from_name`, `texto`, `hora`, `fecha`, `tipo`, `fotos`, `municipio` — chat de Telegram de los municipios elegidos (desde `/mensaje`; `hora` = local UTC−3, `fotos` = JSON de media_ids) |
 | `fluir_mapas` | Table DAT | `municipio`, `ruta` — ruta **absoluta** al mapa HTML de cada municipio elegido (desde `/mapa`; el HTML lo genera `scripts/mapas_municipio.py`, variante `ruta`) |
 
+> **Chat HTML (Web Render)**: además del canal OSC (`/mensaje` → `fluir_telegram`, intacto
+> como respaldo/estado), el puente genera `td/chat_fluir.html` — HTML **autocontenido**
+> (datos embebidos, cero red, mismo principio que los mapas) que renderiza el chat y lo
+> revela **sincronizado con la hora del loop**. En cada `/fin` el callbacks apunta el Web
+> Render TOP `web_render_chat` a `td/chat_fluir.html?t0=<epoch_ms>&loop_secs=<N>`: la página
+> arma su propio reloj (`t = (Date.now()-t0)/1000 % loop_secs` → hora 0..24) y muestra los
+> mensajes conforme el loop alcanza su `hora` local (UTC−3). Las fotos viajan como data URIs
+> (thumbnails embebidos); sin servidor ni fetch.
+
 **Por qué**: 4 de las 5 tablas por tipo comparten estructura (`[media_id,
 ruta, keypoint, hora, tipo]`) y el callbacks las llena con un único helper
 `_tabla_para_tipo()`; **`fluir_textos` es la excepción**: suma `titulo`/`texto`
@@ -958,6 +969,10 @@ de pipeline visual, pero los nombres y tablas quedan disponibles.
 - [ ] **`fluir_mapas`** — Table DAT (municipio, ruta) — ruta al mapa HTML de cada
       municipio elegido; se llena con `/mapa` (se crea con `crear_tablas_fluir.dat`,
       igual que el resto).
+- [ ] **`web_render_chat`** — Web Render TOP en `/project2`, URL inicial
+      `file:///.../td/chat_fluir.html` (ruta absoluta); el callbacks lo recarga en
+      cada `/fin` con `?t0=<epoch_ms>&loop_secs=<N>` (el HTML lo genera `puente_td.py`
+      durante la ráfaga; el chat revela mensajes sincronizado con el loop, cero red).
 - [ ] (Opcional, etapa visual) **`fluir_loop`** Timeline CHOP; **`fluir_movie`**
       Movie File In TOP; **`fluir_engine`** Script DAT con el planificador (scheduler).
 - [ ] Verificación de punta a punta (3 terminales):
@@ -987,6 +1002,7 @@ de pipeline visual, pero los nombres y tablas quedan disponibles.
 | 11 | Contenido real de los textos en TD | **Resuelta** | mensaje separado `/flujos/fluir/texto <media_id> <titulo> <texto>` justo después de `/medio`, solo para type='text'; lleva el contenido real como unidad de medio (`titulo_seccion` + `texto_completo`, truncado de seguridad a 8000 chars); sin ubicación/tags en las tablas — lo resuelve el servidor de DB; guard `numCols` en `_recibir_medio`/`_recibir_texto` ante pérdida de `/tabla text` (UDP) |
 | 12 | Backfill anti-pérdida de textos + fix de API Table DAT | **Resuelta** | al `/fin`, `_completar_textos_desde_spec()` completa `titulo`/`texto` en `fluir_textos` desde `td/spec_fluir.json` cuando el mensaje `/flujos/fluir/texto` se pierde por UDP (ráfagas grandes); celdas de Table DAT se escriben con `tabla[fila, col] = valor` (`setCell` no existe en `td.tableDAT`) |
 | 13 | Chat de Telegram en el Fluir | **Resuelta** | tabla propia `fluir_telegram` (no es medio del loop: sin keypoint; `hora` = local UTC−3 de llegada). Se envía dentro de `_procesar_rafaga` SOLO si hay municipios elegidos (bloque `/tabla telegram` + `/mensaje` ×N), replicando el criterio web (rango de fechas de los medios del municipio, `es_sistema=0`, texto truncado a 250 chars, `fotos` como JSON de media_ids). No cuenta en los `recibidos/esperados` del `/fin`; el resumen lo reporta como `telegram=N` |
+| 14 | Chat de Telegram renderizado en HTML para TD | **Resuelta** | además del OSC (`/mensaje` → `fluir_telegram`, intacto), `puente_td.py --generar-chat-html` (default) genera `td/chat_fluir.html` (autocontenido, cero red; fotos como data URIs) y el callbacks lo recarga en `/fin` con `?t0=&loop_secs=` → el Web Render TOP `web_render_chat` muestra el chat sincronizado con la hora del loop (revelado acumulativo por `hora` local). El canal OSC queda como respaldo/estado |
 | 14 | Mapas por municipio en el Fluir (fase 1: solo ruta) | **Resuelta** | tabla propia `fluir_mapas` (no es medio del loop). El puente envía `/flujos/fluir/mapa <municipio> <ruta>` × municipios elegidos, con la ruta **absoluta** al mapa HTML generado por `scripts/mapas_municipio.py` (el nombre de archivo es **exactamente** el de `_nombre_archivo` para la variante configurada — `VARIANTE_MAPA_MUNICIPIO`, default `ruta`: `mapas/mapa_municipio_<municipio>_ruta.html`, slug ASCII sin acentos: `'Río Hondo'`→`Rio_Hondo`; plantilla `PLANTILLA_MAPA_MUNICIPIO`, ajustable; la ruta completa = raíz del proyecto + ese archivo). El HTML **no viaja por OSC** (evita el límite de tamaño del mensaje); TD decide cómo renderizarlo (p. ej. Web Render TOP). No cuenta en `recibidos/esperados` del `/fin`. **Fase 2 pendiente**: capas extra al mapa (marcadores por tags/colores), Web Render Source=DAT editable, sync con el loop |
 
 ---

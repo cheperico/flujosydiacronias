@@ -10,7 +10,9 @@ Modos:
                  tipo, chiches y, si hay municipios elegidos, los mensajes
                  de Telegram del chat como bloque /mensaje → fluir_telegram
                  y las rutas de mapas por municipio como bloque /mapa →
-                 fluir_mapas)
+                 fluir_mapas). Además genera un HTML autocontenido
+                 (td/chat_fluir.html) que TouchDesigner carga con un Web
+                 Render TOP (file://, cero red).
 
 Uso básico:
   python scripts/td/puente_td.py elecciones           # nubes de elecciones
@@ -21,6 +23,7 @@ Uso básico:
 import argparse
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -222,6 +225,11 @@ _ZONA_ARGENTINA = timezone(timedelta(hours=-3))
 # (decisión de diseño: un chat renderizable en TD; la web recorta a 150 chars).
 MAX_TEXTO_TELEGRAM = 250
 
+# Ruta RELATIVA (a la raíz del proyecto) del HTML del chat de Telegram que
+# genera el puente para que TouchDesigner lo levante con un Web Render TOP.
+# Vive en td/ porque es un artefacto del parche TD (no del deploy web).
+CHAT_HTML_RELATIVO = "td/chat_fluir.html"
+
 
 def _parsear_fecha_utc(valor: Optional[str]) -> Optional[datetime]:
     """Parsea un date_utc de Telegram (ISO 8601) a datetime aware UTC."""
@@ -336,6 +344,221 @@ def _consultar_mensajes_telegram(
     return mensajes
 
 
+def _generar_html_chat(
+    conn: sqlite3.Connection,
+    mensajes: list[dict],
+    ruta_salida: str,
+    con_fotos: bool = True,
+) -> Optional[str]:
+    """Genera el HTML autocontenido del chat de Telegram para TouchDesigner.
+
+    Web Render TOP (file://, cero red). Embebe los mensajes como JSON inline
+    y el reloj del loop (?t0=&loop_secs=). Cuando se abre sin parámetros
+    (?t0, ?loop_secs) todos los mensajes se muestran de inmediato (preview
+    estática).
+
+    Args:
+        conn: conexión SQLite (para resolver media_ids de fotos).
+        mensajes: lista de dicts devuelta por _consultar_mensajes_telegram.
+        ruta_salida: ruta del archivo HTML a escribir.
+        con_fotos: si se embeben fotos inline como data URIs (default True).
+
+    Returns:
+        Ruta absoluta del archivo escrito, o None si no se pudo generar.
+    """
+    import base64
+    import io
+
+    # Pillow es opcional: si no está instalado, se omiten las fotos.
+    try:
+        from PIL import Image
+    except ImportError:
+        if con_fotos:
+            log.warning("  Pillow no disponible; se omiten fotos del HTML del chat.")
+        con_fotos = False
+
+    n_fotos = 0
+    datos: list[dict] = []
+
+    for m in mensajes:
+        fotos_data: list[str] = []
+        if con_fotos:
+            # m["fotos"] es un JSON string de media_ids, p. ej. "[42, 57]"
+            try:
+                media_ids = json.loads(m["fotos"]) if m["fotos"] else []
+            except (json.JSONDecodeError, TypeError):
+                media_ids = []
+            for mid in media_ids:
+                try:
+                    fila = conn.execute(
+                        "SELECT filepath_absoluto FROM media WHERE id = ?",
+                        (int(mid),),
+                    ).fetchone()
+                    if not fila:
+                        continue
+                    ruta_archivo = str(fila[0])
+                    if not os.path.isfile(ruta_archivo):
+                        continue
+                    img = Image.open(ruta_archivo)
+                    # Si tiene canal alfa, composar sobre negro para JPEG
+                    if img.mode in ("RGBA", "LA", "PA"):
+                        fondo = Image.new("RGB", img.size, (0, 0, 0))
+                        fondo.paste(img, mask=img.split()[-1])
+                        img = fondo
+                    elif img.mode != "RGB":
+                        img = img.convert("RGB")
+                    # Redimensionar: lado más largo ≤ 240 px
+                    ancho, alto = img.size
+                    largo = max(ancho, alto)
+                    if largo > 240:
+                        ratio = 240.0 / largo
+                        img = img.resize(
+                            (int(ancho * ratio), int(alto * ratio)),
+                            Image.LANCZOS,
+                        )
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=75)
+                    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                    fotos_data.append(f"data:image/jpeg;base64,{b64}")
+                    n_fotos += 1
+                except Exception:
+                    # Nunca crashear por una foto; simplemente se salta.
+                    continue
+
+        datos.append({
+            "id": m["id"],
+            "from_name": m["from_name"],
+            "texto": m["texto"],
+            "hora": m["hora"],
+            "fecha": m["fecha"],
+            "tipo": m["tipo"],
+            "municipio": m["municipio"],
+            "fotos": fotos_data,
+        })
+
+    # Serializar y proteger contra </script>
+    json_cadena = json.dumps(datos, ensure_ascii=False)
+    json_cadena = json_cadena.replace("</", "<\\/")
+
+    html = _PLANTILLA_CHAT_HTML.replace("<JSON_EMBEDDED>", json_cadena)
+
+    try:
+        Path(ruta_salida).parent.mkdir(parents=True, exist_ok=True)
+        with open(ruta_salida, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        log.info("  Chat HTML escrito: %s (%d mensajes, %d fotos)",
+                 ruta_salida, len(datos), n_fotos)
+        return os.path.abspath(ruta_salida)
+    except OSError as exc:
+        log.error("  Error escribiendo HTML del chat: %s", exc)
+        return None
+
+
+# Plantilla del HTML autocontenido del chat. El placeholder <JSON_EMBEDDED> se
+# reemplaza por el JSON serializado de los mensajes (con escapes de </script>).
+_PLANTILLA_CHAT_HTML = r"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flujos · Chat Telegram (TD)</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; font-family:system-ui,'Segoe UI',sans-serif; background:transparent; }
+  :root { --tr:200; --tg:200; --tb:200; --ar:255; --ag:200; --ab:100; }
+  #chat { display:flex; flex-direction:column; gap:.1rem; width:100%; height:100%; min-height:0; overflow-y:auto; padding:.2rem .3rem; color:rgb(var(--tr),var(--tg),var(--tb)); scrollbar-width:none; }
+  #chat::-webkit-scrollbar { display:none; }
+  .lugar { margin:.25rem 0 .1rem; font-size:.48rem; letter-spacing:.08em; text-transform:uppercase; opacity:.5; color:rgb(var(--ar),var(--ag),var(--ab)); border-top:1px solid rgba(var(--tr),var(--tg),var(--tb),.12); padding-top:.15rem; font-weight:500; flex-shrink:0; }
+  .msg { font-size:.5rem; line-height:1.3; border-bottom:1px solid rgba(var(--tr),var(--tg),var(--tb),.08); padding:.1rem 0; opacity:0; transition:opacity .6s ease; flex-shrink:0; }
+  .msg.visible { opacity:1; }
+  .msg .hora { opacity:.5; font-size:.45rem; }
+  .msg .nombre { opacity:.85; font-weight:600; }
+  .msg .texto { opacity:.65; white-space:pre-wrap; }
+  .fotos { display:flex; gap:.15rem; margin-top:.1rem; flex-wrap:wrap; }
+  .fotos img { width:auto; height:2.8rem; max-width:5rem; object-fit:cover; border-radius:2px; border:1px solid rgba(var(--tr),var(--tg),var(--tb),.12); }
+</style>
+</head>
+<body>
+<div id="chat"></div>
+<script>
+var MENSAJES = <JSON_EMBEDDED>;
+(function(){
+  function iconoTipo(t){
+    if (t === 'photo') return '\uD83D\uDCF7 ';
+    if (t === 'video') return '\uD83C\uDFAC ';
+    if (t === 'voice') return '\uD83C\uDFA4 ';
+    return '\uD83D\uDCCE ';
+  }
+  function hhmm(h){
+    if (h == null || isNaN(h)) return '';
+    var hi = Math.floor(h);
+    var mi = Math.round((h - hi) * 60);
+    if (mi === 60) { mi = 0; hi += 1; }
+    if (hi === 24) hi = 0;
+    return ('0' + hi).slice(-2) + ':' + ('0' + mi).slice(-2);
+  }
+  var params = new URLSearchParams(location.search);
+  var t0 = parseFloat(params.get('t0'));
+  var loopSecs = parseFloat(params.get('loop_secs'));
+  var conReloj = isFinite(t0) && isFinite(loopSecs) && loopSecs > 0;
+  function horaActual(){
+    if (!conReloj) return 24;
+    var t = ((Date.now() - t0) / 1000) % loopSecs;
+    return (t / loopSecs) * 24;
+  }
+  var cont = document.getElementById('chat');
+  var NODOS = [];
+  var orden = [];
+  MENSAJES.forEach(function(m){
+    if (orden.indexOf(m.municipio) === -1) orden.push(m.municipio);
+  });
+  orden.forEach(function(lugar){
+    var sep = document.createElement('div');
+    sep.className = 'lugar';
+    sep.textContent = lugar || '—';
+    cont.appendChild(sep);
+    MENSAJES.forEach(function(m){
+      if (m.municipio !== lugar) return;
+      var div = document.createElement('div');
+      div.className = 'msg';
+      var linea = document.createElement('div');
+      linea.appendChild(document.createTextNode(hhmm(m.hora) + ' '));
+      var horaEl = document.createElement('span'); horaEl.className = 'hora';
+      horaEl.textContent = (m.fecha || '') + ' ';
+      linea.appendChild(horaEl);
+      var nom = document.createElement('span'); nom.className = 'nombre';
+      nom.textContent = (m.from_name || 'Desconocido') + ' ';
+      linea.appendChild(nom);
+      var txt = document.createElement('span'); txt.className = 'texto';
+      txt.textContent = iconoTipo(m.tipo) + (m.texto || '');
+      linea.appendChild(txt);
+      div.appendChild(linea);
+      if (m.fotos && m.fotos.length) {
+        var fot = document.createElement('div'); fot.className = 'fotos';
+        m.fotos.forEach(function(src){
+          var im = document.createElement('img'); im.src = src; im.loading = 'lazy';
+          fot.appendChild(im);
+        });
+        div.appendChild(fot);
+      }
+      cont.appendChild(div);
+      NODOS.push(div);
+    });
+  });
+  setInterval(function(){
+    var ha = horaActual();
+    for (var i = 0; i < MENSAJES.length && i < NODOS.length; i++) {
+      if (ha >= MENSAJES[i].hora) NODOS[i].classList.add('visible');
+    }
+    cont.scrollTop = cont.scrollHeight;
+  }, 250);
+})();
+</script>
+</body>
+</html>
+"""
+
+
 # ── Mapas por municipio (ruta al HTML generado por mapas_municipio.py) ────────
 
 # Variante del mapa que se envía a TD. Las posibles viven en
@@ -392,6 +615,7 @@ def _procesar_rafaga(
     enviar_medios: bool = True,
     enviar_telegram: bool = True,
     enviar_mapas: bool = True,
+    generar_chat_html: bool = True,
 ) -> Optional[str]:
     """
     Genera el spec del loop con loop_db.generar_loop, lo escribe a archivo y
@@ -442,6 +666,8 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
         enviar_medios: si se envían los mensajes tabla/medio/chiche (default True).
         enviar_telegram: si se envían los mensajes de Telegram (default True).
         enviar_mapas: si se envían las rutas de mapas por municipio (default True).
+        generar_chat_html: si se escribe el HTML autocontenido del chat
+            (td/chat_fluir.html) para el Web Render de TD (default True).
 
     Returns:
         Ruta del spec escrita, o None si no se pudo generar.
@@ -458,6 +684,8 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
         ruta_spec = Path(__file__).resolve().parents[2] / ruta_spec
     ruta_spec.parent.mkdir(parents=True, exist_ok=True)
     ruta_spec = str(ruta_spec)
+
+    ruta_chat_html = Path(__file__).resolve().parents[2] / CHAT_HTML_RELATIVO
 
     spec = loop_db.generar_loop(
         db_path=db_path,
@@ -489,6 +717,14 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
         try:
             mensajes_telegram = _consultar_mensajes_telegram(
                 conn, filtros["municipios"])
+            # HTML autocontenido del chat para el Web Render de TD (canal OSC intacto).
+            # Se escribe SIEMPRE que haya municipios (aunque haya 0 mensajes), para que
+            # td/chat_fluir.html exista y el Web Render tenga a qué apuntar.
+            if generar_chat_html:
+                ruta_chat = _generar_html_chat(
+                    conn, mensajes_telegram, str(ruta_chat_html))
+                if not ruta_chat:
+                    log.warning("  No se pudo escribir el HTML del chat.")
         finally:
             conn.close()
         log.info("   Telegram: %d mensajes del chat (municipios: %s)",
@@ -623,6 +859,7 @@ def modo_fluir(
     enviar_medios: bool = True,
     enviar_telegram: bool = True,
     enviar_mapas: bool = True,
+    generar_chat_html: bool = True,
 ) -> None:
     """
     Modo "Fluir": escucha la ráfaga de selección de TD, la acumula por grupo,
@@ -647,6 +884,8 @@ def modo_fluir(
             (solo cuando hay municipios elegidos; False → sin bloque /mensaje).
         enviar_mapas: si se envían las rutas de mapas por municipio por 9002
             (solo cuando hay municipios elegidos; False → sin bloque /mapa).
+        generar_chat_html: si se escribe el HTML autocontenido del chat
+            (td/chat_fluir.html) para el Web Render de TD (default True).
     """
     selecciones: dict[str, list[str]] = {}
     ultimo_mensaje = time.monotonic()
@@ -692,6 +931,7 @@ def modo_fluir(
                     enviar_medios=enviar_medios,
                     enviar_telegram=enviar_telegram,
                     enviar_mapas=enviar_mapas,
+                    generar_chat_html=generar_chat_html,
                 )
                 selecciones.clear()
                 if una_vez:
@@ -724,6 +964,7 @@ Ejemplos:
   python scripts/td/puente_td.py fluir --no-enviar-medios        # solo resumen + fin
   python scripts/td/puente_td.py fluir --no-enviar-telegram      # sin mensajes de Telegram
   python scripts/td/puente_td.py fluir --no-enviar-mapas         # sin rutas de mapas por municipio
+  python scripts/td/puente_td.py fluir --no-generar-chat-html   # sin HTML del chat (solo OSC)
 
 Probar "fluir" sin TouchDesigner (3 terminales):
 
@@ -771,6 +1012,12 @@ Probar "fluir" sin TouchDesigner (3 terminales):
                         help="Enviar por 9002 las rutas de mapas por municipio "
                              "(default: True, solo si hay municipios elegidos). "
                              "Con --no-enviar-mapas se omite el bloque /mapa.")
+    parser.add_argument("--generar-chat-html", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Escribir el HTML autocontenido del chat "
+                             "(td/chat_fluir.html) para el Web Render de TD "
+                             "(default: True). Con --no-generar-chat-html no "
+                             "se genera.")
     parser.add_argument("--host", default=OSC_HOST,
                         help=f"Host TD (default: {OSC_HOST})")
     parser.add_argument("--port", type=int, default=OSC_PUERTO_TD,
@@ -802,6 +1049,7 @@ Probar "fluir" sin TouchDesigner (3 terminales):
             enviar_medios=args.enviar_medios,
             enviar_telegram=args.enviar_telegram,
             enviar_mapas=args.enviar_mapas,
+            generar_chat_html=args.generar_chat_html,
         )
 
     return 0

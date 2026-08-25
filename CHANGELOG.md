@@ -15,6 +15,7 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
   - **Sin servidor ni cambios en TD**: los HTML son autocontenidos y se abren al instante en `file://`, independientes de internet/CDN.
   - `mapas_municipio.py` y `mapa_ruta.py` guardan con `guardar_autocontenido` (flag `--assets-cache`; fallback CDN si la descarga de assets falla al generar).
   - **Migración**: regenerados los 297 mapas (296 municipio + 1 ruta), 0 errores. Verificado: **0** archivos con refs CDN, fuentes inline, total 545 MB (mediana 1.6 MB).
+- **Chat de Telegram renderizado en HTML para TouchDesigner (Web Render)** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat`): además del OSC (`/mensaje` → `fluir_telegram`, intacto), en cada ráfaga con municipios el puente genera `td/chat_fluir.html` — HTML **100% autocontenido** (datos embebidos, fotos como data URIs, cero red; mismo principio que los mapas) que renderiza el chat y lo **revela sincronizado con la hora del loop**. En `/fin` el callbacks apunta el Web Render TOP `web_render_chat` a `td/chat_fluir.html?t0=<epoch_ms>&loop_secs=<N>`: la página arma su propio reloj (`t = (Date.now()-t0)/1000 % loop_secs` → hora 0..24) y muestra los mensajes conforme el loop alcanza su `hora` local (UTC−3); sin `t0` (vista previa en browser) muestra todo el thread. Flags `--generar-chat-html`/`--no-generar-chat-html`. `gui_fluir.py` no cambia (delega en `_procesar_rafaga`).
 
 ### Documentación
 - **AGENTS.md**: filas de `mapas_municipio.py`, `mapa_ruta.py` y `tiles_offline.py` (autocontenido + `--assets-cache`).
