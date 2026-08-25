@@ -143,8 +143,9 @@ La conexión es **en vivo**: al tocar cualquier chip se recargan los medios
 ### Bloque "Videos 360°" (Ago 2026)
 - Nuevo bloque de medios que lista los videos `subtipo='360'` filtrados por los
   mismos chips (segundo fetch `tipo=video&subtipo=360` en `cargarMediosFiltrados`).
-- Click en un ítem → **visor fullscreen** con Three.js local (`js/three.min.js`):
-  esfera + drag/zoom/auto-rotación. Requiere HTTP Range en `servir_medio.php`
+- Click en un ítem → **visor 360 embebido en el propio bloque** (no fullscreen)
+  con Three.js local (`js/three.min.js`): esfera + drag/zoom/auto-rotación y
+  barra ◀▶ para navegar entre videos. Requiere HTTP Range en `servir_medio.php`
   (implementado). Detalle en `docs/videos_360_web.md` y `docs/deploy.md`.
 
 ---

@@ -6,8 +6,9 @@
 > visualización web (sin sufijo de versión). `deploy/` es a la vez la **fuente**
 > del sitio (HTML/PHP/JS versionados en git) y el **destino** del exportador
 > (medios copiados y snapshot `visualizacion.db` generados — ignorados por git).
-> Las herramientas de prueba del motor de loop (`prueba_loop.html`, `loop.php`,
-> `spec.json`) viven en `pruebas/`, separadas del deploy.
+> El spec portable del motor de loop se regenera desde el TUI a `deploy/spec.json`
+> (la carpeta `pruebas/` con el prototipo `prueba_loop.html`/`loop.php` fue
+> eliminada en la limpieza del workspace — los vigentes viven en `deploy/`).
 
 ## Propósito
 
@@ -18,9 +19,9 @@ DB real del pipeline — es un snapshot desacoplado para la web.
 
 - Lienzo interactivo (`index.html` + `app.js`): bloques en coordenadas mundo,
   paletas por hora, nube de tags, slideshow de medios, mensajes Telegram.
-- 6 endpoints PHP que sirven el snapshot (`visualizacion.db`) a la SPA.
-- Herramienta de prueba del motor de loop (`pruebas/prueba_loop.html`): valida
-  `spec.json` sin TouchDesigner (fuera de `deploy/`).
+- 7 endpoints PHP que sirven el snapshot (`visualizacion.db`) a la SPA.
+- Spec portable del motor de loop (`deploy/spec.json`): valida `spec.json` desde
+  el TUI (Visualizaciones → Exportar → Regenerar spec), sin TouchDesigner.
 
 ---
 
@@ -32,22 +33,19 @@ deploy/
 ├── .htaccess                  # Seguridad Apache (protege .db/.json/.md/.py)
 ├── includes/
 │   └── db.php                 # Conexión PDO a deploy/db/visualizacion.db
-├── api/                       # 6 endpoints JSON
+├── api/                       # 7 endpoints JSON
 │   ├── medios_filtrados.php   # Medios con filtros (municipio/color/provincia/tag/tipo)
 │   ├── servir_medio.php       # Archivo binario del medio (con thumbnails GD)
 │   ├── tags.php               # Nube de tags desde keywords (ia_keywords), no descripciones
 │   ├── recorrido.php          # Puntos + colores del recorrido
 │   ├── puntos.php             # Embeddings del lienzo (⚠️ hoy vacío, ver "Gaps")
-│   └── mensajes_telegram.php   # Mensajes de Telegram de un municipio
+│   ├── mensajes_telegram.php  # Mensajes de Telegram de un municipio
+│   └── textos.php             # Transcripciones para el bloque "Textos" (audios priorizados)
 ├── css/estilos.css
 ├── js/app.js                   # Lógica del lienzo (bloques, paletas, FLOW)
 ├── db/visualizacion.db         # SNAPSHOT exportado (generado, no versionar)
-└── media/                      # Medios copiados por el deploy (generado)
-
-pruebas/                        # Herramientas de prueba del motor de loop (fuera de deploy)
-├── prueba_loop.html            # Reproductor de prueba del motor de loop (consume spec.json)
-├── loop.php                    # Sirve pruebas/spec.json en crudo (para prueba_loop.html)
-└── spec.json                   # Spec compilada del motor de loop (generada, no versionar)
+├── media/                      # Medios copiados por el deploy (generado)
+└── spec.json                   # Spec portable del motor de loop (generada, no versionar)
 ```
 > El exportador es **genérico** (sirve a cualquier implementación web, no solo
 > esta) y vive en `scripts/exportar_visualizacion.py` (fuera de `deploy/`). El
@@ -86,13 +84,14 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
    caracteres de caja `─`):
    ```powershell
    $env:PYTHONIOENCODING='utf-8'
-   python scripts/ai_media/loop_db.py --horas 7 16 13 18 --salida pruebas/spec.json
+   python scripts/ai_media/loop_db.py --horas 7 16 13 18 --salida deploy/spec.json
    ```
    `loop_db.py` lee `db/flujos.db` (solo lectura), calcula la hora de día de cada
    medio, genera los chiches y produce `spec.json` (portable: web de prueba y
    TouchDesigner). Los `--horas` definen los arcos; los del prototipo actual son
-   `7 16 13 18`. La spec la consume `pruebas/prueba_loop.html` (vía
-   `pruebas/loop.php`); TD genera la suya propia en `td/spec_fluir.json`.
+   `7 16 13 18`. La spec queda en `deploy/spec.json` (la carpeta `pruebas/` con
+   `prueba_loop.html`/`loop.php` fue eliminada en la limpieza del workspace);
+   TD genera la suya propia en `td/spec_fluir.json`.
 
 > Al regenerar con los datos limpios (translategemma aplicado en la DB principal)
 > se propagan las descripciones ES correctas y los 1522 medios completos a la web
@@ -127,6 +126,7 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 | `recorrido.php` | — | `{total, puntos, colores}` (colores = UNION de color_1..3) |
 | `puntos.php` | — | `{total, puntos}` (embeddings) — **hoy 0 puntos** |
 | `mensajes_telegram.php` | `municipio` (obligatorio), `limite` (def 200), `fotos` (bool) | `{total, rango, mensajes + fotos JSON}` |
+| `textos.php` | `limite` (1–20, def 8), `no` (csv de ids a excluir) | transcripciones del bloque "Textos" (prioriza audios transcritos) |
 
 > **Filtro por horas**: `horas` (csv 0..23) filtra con franja continua `[min,max]`
 > en hora LOCAL del viaje (Argentina, UTC−3). El snapshot guarda `hora` en UTC
@@ -137,8 +137,9 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 > 2–22 amplia). El bloque **Videos** muestra los videos regulares (sin 360) como
 > lista de descripciones; los **360°** tienen su propio bloque con visor.
 
-> `loop.php` (que servía `spec.json`) se movió a `pruebas/` junto con
-> `prueba_loop.html`: la SPA del deploy NO consume la spec del motor.
+> `loop.php` y `prueba_loop.html` (prototipo que consumía `spec.json`) se
+> eliminaron en la limpieza del workspace (2026-08-23): la SPA del deploy NO
+> consume la spec del motor.
 
 ---
 
@@ -192,8 +193,8 @@ Cualquier Apache con PHP (PDO SQLite) apuntando a `deploy/`. El `.htaccess`:
 - Deniega `.db|sqlite|sqlite3|json` (protege `visualizacion.db`)
 - Deniega `.htaccess|htpasswd|md|py|sh`
 El snapshot es lo único que se sirve (vía PHP), los fuentes `.py/.md` quedan
-fuera de alcance por HTTP. La spec del motor vive en `pruebas/` (herramienta de
-prueba, no parte del deploy).
+fuera de alcance por HTTP. La spec portable del motor (`deploy/spec.json`) es
+una herramienta de prueba regenerable desde el TUI, no parte del deploy.
 
 ---
 

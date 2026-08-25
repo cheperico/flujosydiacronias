@@ -13,6 +13,12 @@ permite mirar alrededor (drag / giroscopio / zoom).
 
 ## Estado actual del proyecto (relevante para implementar)
 
+> ⚠️ **Snapshot histórico pre-implementación (Ago 2026)**: esta tabla refleja el
+> estado ANTES de la implementación del visor 360. El estado REAL actual está en
+> la sección **"Implementación (2026-08-25)"** al final de este documento
+> (visor 360 embebido con Three.js, `servir_medio.php` con HTTP Range, flag de
+> subtipo 360 persistido). Se mantiene por contexto histórico del diseño.
+
 | Pieza | Estado |
 |---|---|
 | Reproducción de video en la web (`deploy/`) | ❌ No existe: el bloque "Videos" del lienzo es solo una lista de descripciones (`renderMediosLista` → rama "otros"). Solo reproducen imágenes (slideshow) y audio (plan `SONIDO`) |

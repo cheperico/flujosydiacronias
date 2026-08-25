@@ -148,8 +148,8 @@ Etapa 5: INSTALACIÓN          →  TouchDesigner + motor de deriva
 
 | Item | Prioridad | Estado |
 |------|-----------|--------|
-| Timeout en ThreadPoolExecutor (keywords/descriptions) para evitar colgado por suspensión | Media | ❌ Pendiente |
-| Verificar timeouts en ollama_client.py (requests.post) | Media | ❌ Pendiente |
+| Timeout en ThreadPoolExecutor (keywords/descriptions) para evitar colgado por suspensión | Media | ✅ Resuelto | checkpoint + `wait(FIRST_COMPLETED)` + `pool.shutdown(cancel_futures=True)` (ver AGENTS.md "Riesgos conocidos") |
+| Verificar timeouts en ollama_client.py (requests.post) | Media | ✅ Resuelto | `ollama_client.py` usa timeout=180s (cliente de traducción legacy: 300s) |
 
 ---
 

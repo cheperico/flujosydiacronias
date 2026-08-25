@@ -85,12 +85,12 @@ python flujos.py --help         # Ayuda general
 | `relocate --new-root CARPETA` | Actualizar rutas si los archivos se mudaron |
 | `check-db` | Resumen de la DB (totales por tipo) |
 | `check-gps` | Revisar qué archivos tienen GPS |
-| `undo-ingest` | Deshacer una ingesta por batch ID |
-| `backfill-end-time [--mode]` | Precalcular end_time = timestamp_utc + duration_secs |
+| `undo-ingest` / `undo` | Deshacer una ingesta por batch ID |
+| `backfill-end-time` / `backfill` `[--mode]` | Precalcular end_time = timestamp_utc + duration_secs |
 | `backup-db` / `backup` | Crear backup de la DB |
 | `restore-db` / `restore` | Restaurar DB desde un backup |
 | `reset-db` / `reset` | Resetear la DB (con backup previo) |
-| `export-csv [--table] [--output]` | Exportar tablas de la DB a CSV |
+| `export-csv` / `csv` `[--table] [--output]` | Exportar tablas de la DB a CSV |
 | `import-telegram` / `tg` | Importar export de Telegram a la DB |
 | `ingest-textos` / `textos` | Ingerir textos `.md` de `textos/` como medios type='text' |
 | `mover --new-root X --mode mover` | Mover/copiar medios y actualizar rutas en DB |
@@ -100,7 +100,9 @@ python flujos.py --help         # Ayuda general
 | `audio-frame` / `crossref` | Correlacionar contenido de audio con frames de video |
 | `analizar-video` / `analizar` | Analizar videos con IA: escenas + keywords (scene detection → muestreo → visión) |
 | `keypoints-contexto` / `keypoints` | Keypoints de contexto (devenir geográfico) contra los tracks GPX |
+| `astronomia` | Calcular posición del sol (NOAA) + clasificación twilight |
 | `mapa` | Generar mapa interactivo Folium de la ruta |
+| `mapa-municipios` / `mapas` | Generar un mapa HTML por municipio recorrido (variantes ruta/puntos/contexto/gradiente) |
 
 Cada subcomando acepta `--help` para ver sus opciones específicas.
 
@@ -207,6 +209,7 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
   │  │   ├─ 1. Correlacionar audio con frames
   │  │   └─ 0. Volver
   │  ├─ p. << Anterior → Hoja 1
+  │  ├─ n. Siguiente >> → Hoja 3
   │  └─ 0. Volver
   ├─ Hoja 3: Limpieza de datos
   │  ├─ 1. Limpiar descripciones (eco del prompt)
@@ -225,7 +228,7 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
       ├─ 1. Deploy a deploy/ (pregunta si transcodificar)
       ├─ 2. Deploy a otra carpeta (pregunta si transcodificar)
       ├─ 3. Re-exportar snapshot local (deploy/db, sin copiar medios)
-      ├─ 4. Regenerar spec del loop (pruebas/spec.json)
+      ├─ 4. Regenerar spec del loop (deploy/spec.json)
       ├─ 5. Previsualizar deploy (dry-run)
       └─ 0. Volver
   └─ 3. TouchDesigner (puente OSC)
@@ -734,6 +737,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 | `docs/embeddings_rediseno.md` | Dirección de diseño de la capa semántica (desactivada) |
 | `docs/inferencia_autor.md` | Inferencia de autor desde EXIF/carpeta |
 | `docs/armado_de_tandas.md` | Estrategias de armado de tandas y limpieza |
+| `docs/plan_keywords.md` | Plan de calidad de keywords (5 exactas, refinar v2, sonido/video, nube unificada) |
 | `docs/ideas_externas.md` | Ideas de terceros para la instalación |
 
 ---

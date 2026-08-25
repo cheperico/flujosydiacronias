@@ -7,6 +7,28 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 43] — 2026-08-25
+
+Revisión completa del proyecto contra su documentación y actualización de la misma.
+
+### Corregido
+- **Ruta rota del spec del loop** (`flujos.py`): la opción TUI "Regenerar spec del loop" escribía a `pruebas/spec.json`, pero la carpeta `pruebas/` fue eliminada en la limpieza del workspace (91b0060). Ahora escribe a `deploy/spec.json`. Sincronizadas README.md y `docs/deploy.md`.
+
+### Documentación
+- **AGENTS.md**: 
+  - Catálogo: agregados scripts que faltaban (`consolidar_medios.py`, `fix_gps_sign.py`, `mover_descartadas.py`); corregido `transcribe_media` (el paso `--step transcribe` usa `transcribe.py`); documentados flags reales de `puente_td.py`, `mapa_ruta.py`, `mapas_municipio.py`, `limpiar_descripciones.py`, `repetir_contenido.py`, `query.py`.
+  - Mapa de datos: claves reales de `video_metadata` (`xml_*`, `xmp_*`, `video_spherical_projection`, `sony_device_*`); lista de claves de `media_metadata`/`media_keypoints` ampliada (`ubicacion_video*`, `texto_*`, `ubicacion_video`).
+  - Regla `--mode`: aclaradas excepciones (`inferir_hora_textos.py` y `mapas_municipio.py` solo skip|update; `consolidar_medios.py`/`mover_media.py` usan mover|copiar).
+  - Timeout de Ollama corregido (120s → 180s; legacy 300s); asserts de `test_motor_loop` (47 → 42).
+  - Tabla de documentos: agregado `docs/plan_keywords.md` y ampliada la lista de diseño.
+- **README.md**: agregados subcomandos faltantes (`astronomia`, `mapa-municipios`/`mapas`) y aliases (`undo`, `backfill`, `csv`); corregida navegación de Mantenimiento Hoja 2 (faltaba "n. Siguiente"); tabla de documentos con `plan_keywords.md`.
+- **docs/deploy.md**: removidas referencias a `pruebas/` (eliminada); agregado endpoint `textos.php` (7 endpoints, no 6).
+- **docs/visualizaciones.md**: visor 360 corregido de "fullscreen" a "embebido en el bloque".
+- **docs/videos_360_web.md**: tabla de "estado actual" marcada como snapshot histórico pre-implementación.
+- **ROADMAP.md**: ítems de timeout ThreadPoolExecutor y ollama_client marcados como Resueltos (ya implementados).
+
+---
+
 ## [Entrega 42] — 2026-08-25
 
 ### Añadido

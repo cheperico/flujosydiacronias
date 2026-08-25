@@ -1914,7 +1914,7 @@ def opcion_exportar_visualizacion(db_path: str | None = None):
 
     Paso 1: exportar_visualizacion.py (snapshot SQLite de flujos.db; deploy
     genérico por defecto a deploy/, con copia de medios y transcode opcional).
-    Paso 2: loop_db.py --salida pruebas/spec.json (spec del motor de loop portable).
+    Paso 2: loop_db.py --salida deploy/spec.json (spec del motor de loop portable).
     """
     base = os.path.dirname(__file__)
     exportador = os.path.join(base, "scripts", "exportar_visualizacion.py")
@@ -1961,7 +1961,7 @@ def opcion_exportar_visualizacion(db_path: str | None = None):
         env["PYTHONIOENCODING"] = "utf-8"
         subprocess.run([sys.executable, loop_db,
                         "--horas", "7", "16", "13", "18",
-                        "--salida", os.path.join(base, "pruebas", "spec.json")],
+                        "--salida", os.path.join(base, "deploy", "spec.json")],
                        env=env)
         pausa()
 
@@ -1973,7 +1973,7 @@ def opcion_exportar_visualizacion(db_path: str | None = None):
         "1": ("Deploy a deploy/ (pregunta si transcodificar)", _deploy_default),
         "2": ("Deploy a otra carpeta (pregunta si transcodificar)", _deploy_custom),
         "3": ("Re-exportar snapshot local (deploy/db, sin copiar medios)", _snapshot),
-        "4": ("Regenerar spec del loop (pruebas/spec.json)", _spec_loop),
+        "4": ("Regenerar spec del loop (deploy/spec.json)", _spec_loop),
         "5": ("Previsualizar deploy (dry-run)", _deploy_dry),
     }, db_path, intro=(
         "Exporta un snapshot de flujos.db para una visualizacion web\n"
