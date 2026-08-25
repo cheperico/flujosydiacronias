@@ -274,9 +274,9 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/td/elecciones.py` | Nubes de elecciones (horas, municipios, colores, tags, días, clima) → TD vía OSC | Instalación |
 | `scripts/td/osc_probe.py` | Eco OSC: escucha lo que llega a un puerto y lo imprime (test rápido TD→Python) | Instalación |
 | `scripts/td/util_enter.py` | Helper compartido: `detener_con_enter()` devuelve un `threading.Event` (salida limpia con Enter) | Instalación |
-| `scripts/mapa_ruta.py` | Mapa interactivo con Folium: la línea usa el track GPX; los medios como marcadores. `--tolerancia-metros` reporta discrepancias media vs track | Visualización |
-| `scripts/mapas_municipio.py` | Un mapa HTML por municipio recorrido, con variantes (`ruta`, `puntos`, `contexto`, `gradiente`). La línea de `ruta`/`contexto`/`gradiente` usa el tramo del track GPX del municipio. `--mode skip` genera solo los faltantes; `--mode update` regenera todos. Nombre: `mapa_municipio_<municipio>_<variante>.html` (slug ASCII, sin acentos: `'Río Hondo'`→`Rio_Hondo`). **Los tiles de la vista inicial van incrustados como data URIs** (sin red al abrir en TD; el zoom/pan posterior carga de internet). `--no-embebido` para deshabilitarlo | Visualización |
-| `scripts/tiles_offline.py` | Predescarga de tiles de CartoDB para los mapas por municipio (cache en `tiles_cache/`) e inyección de la capa única con la vista inicial embebida | Visualización |
+| `scripts/mapa_ruta.py` | Mapa interactivo con Folium: la línea usa el track GPX; los medios como marcadores. `--tolerancia-metros` reporta discrepancias media vs track. **HTML autocontenido** (assets JS/CSS inline) | Visualización |
+| `scripts/mapas_municipio.py` | Un mapa HTML por municipio recorrido, con variantes (`ruta`, `puntos`, `contexto`, `gradiente`). La línea de `ruta`/`contexto`/`gradiente` usa el tramo del track GPX del municipio. `--mode skip` genera solo los faltantes; `--mode update` regenera todos. Nombre: `mapa_municipio_<municipio>_<variante>.html` (slug ASCII, sin acentos: `'Río Hondo'`→`Rio_Hondo`). **HTML 100% autocontenido**: tiles de la vista inicial como data URIs + assets JS/CSS de Folium y fuentes inline → se abre en el Web Render TOP con cero red. `--no-embebido` deshabilita la incrustación de tiles | Visualización |
+| `scripts/tiles_offline.py` | Hace los mapas Folium autocontenidos para TouchDesigner: tiles de la vista inicial (data URIs, cache en `tiles_cache/`) y assets JS/CSS/fuentes de Folium (cache en `assets_cache/`, inline en el HTML) | Visualización |
 | `scripts/track_gpx.py` | Helpers de tracks GPX: cargar, interpolar, tramo temporal, haversine, discrepancias media vs track | Visualización |
 | `scripts/check_db.py` | Inspección de la DB | Consulta |
 | `scripts/check_gps.py` | Verifica GPS en archivos via ExifTool | Consulta |
@@ -784,7 +784,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 │   ├── mapa_ruta.py           # Mapa interactivo (Folium, ruta desde track GPX)
 │   ├── mapas_municipio.py     # Mapas por municipio con variantes (Folium)
 │   ├── track_gpx.py           # Helpers de tracks GPX (interpolar, tramo, discrepancias)
-│   ├── tiles_offline.py       # Tiles de vista inicial incrustados (data URIs) + cache
+│   ├── tiles_offline.py       # Mapas autocontenidos: tiles de vista inicial (data URIs) + assets JS/CSS inline
 │   ├── check_db.py            # Inspección de DB
 │   ├── check_gps.py           # Verificación GPS
 │   ├── check_db_data.py       # Helper: clima, día, geocode

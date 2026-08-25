@@ -124,11 +124,13 @@ Puntos que conviene notar antes de programar:
   genera mapas; solo construye la ruta con la plantilla
   `PLANTILLA_MAPA_MUNICIPIO` (ajustable en `puente_td.py`) y la envía. TD la
   guarda en `fluir_mapas` y decide cómo renderizarla (p. ej. Web Render TOP).
-  **Los HTML ya traen los tiles de la vista inicial incrustados como data URIs**
-  (`scripts/tiles_offline.py`): al abrir el mapa en el Web Render TOP (Chromium
-  sobre `file://`) la vista inicial se muestra al instante sin descargar de
-  internet, y el zoom/pan posterior carga de CartoDB online. No requiere
-  servidor. Para regenerar mapas sin incrustación: `--no-embebido`.
+  **Los HTML ya traen la vista inicial y todos los assets incrustados**:
+  tiles de la vista inicial como data URIs + JS/CSS de Folium (Leaflet, jQuery,
+  Bootstrap, FontAwesome) y fuentes de íconos inline (`scripts/tiles_offline.py`,
+  `guardar_autocontenido`) → el mapa se abre en el Web Render TOP (Chromium sobre
+  `file://`) con **CERO red** (el CEF usa cache temporal por TOP, por eso antes
+  re-descargaba los CDN). No requiere servidor. Para regenerar mapas sin
+  incrustación de tiles: `--no-embebido`.
 - **El archivo `td/spec_fluir.json` se escribe ANTES del primer mensaje OSC** y
   ahora **no es la fuente única**: se lee para **cotejar** (debug de pérdida
   UDP) y para el **backfill anti-pérdida** de textos en `fin`.

@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """
-tiles_offline.py — Predescarga de tiles de la vista inicial para mapas Folium.
+tiles_offline.py — Mapas Folium autocontenidos para TouchDesigner (cero red).
 
 Los mapas por municipio que renderiza TouchDesigner (Web Render TOP sobre
-`file://`) descargan sus tiles de CartoDB por internet en runtime, y al abrir
-varios mapas a la vez se genera un cuello de botella de red. Este módulo
-incrusta en el propio HTML los tiles de la **vista inicial** como data URIs
-(base64): al abrir el mapa, Leaflet los muestra al instante sin red, y el
-zoom/desplazamiento posterior sigue cargando de internet (capa única).
+`file://`) descargaban de internet, en runtime, sus tiles de CartoDB Y los
+assets JS/CSS de Folium (Leaflet, jQuery, Bootstrap, FontAwesome...) de varios
+CDNs. El Web Render TOP usa CEF con un proceso de navegador por TOP y una cache
+temporal que se borra al salir → cada mapa re-descargaba todo desde cero, y la
+página quedaba en blanco hasta resolver los assets (cuello de botella con varios
+mapas abiertos a la vez).
 
-Nada de esto requiere servidor: los data URIs son parte del documento HTML y
-funcionan en `file://` (Chromium de TD), sin CORS ni procesos extra.
+Este módulo hace cada HTML 100% autocontenido en dos planos:
+  1. TILES de la vista inicial → data URIs base64 (ver abajo).
+  2. ASSETS JS/CSS de Folium + fuentes de íconos → incrustados inline en el HTML
+     (vía `folium` `embedded=True`), eliminando cualquier request a CDN.
 
-Estrategia (UNA sola capa de tiles, sin doble descarga):
+Nada de esto requiere servidor: los data URIs e inline son parte del documento
+HTML y funcionan en `file://` (Chromium de TD), sin CORS ni procesos extra.
+
+Tiles (UNA sola capa, sin doble descarga):
   El mapa se crea SIN capa base (folium.Map(tiles=None)) y `incrustar_tiles_vista_inicial`
   inyecta un L.TileLayer custom que, para los tiles de la vista inicial,
   devuelve el data URI incrustado y, para los demás, delega en la URL online de
@@ -24,6 +30,15 @@ Estrategia (UNA sola capa de tiles, sin doble descarga):
 Zooms por defecto: 11-13 (aprobado por el usuario). Si el zoom inicial que
 elegiría `fitBounds` cae fuera de ese rango (municipios muy chicos/grandes), se
 expande automáticamente a `[z_est-1, z_est, z_est+1]` para cubrir la vista.
+
+Assets autocontenidos:
+  `guardar_autocontenido(mapa, ruta)` descarga (una vez, cache en `assets_cache/`,
+  regenerable) los JS/CSS que Folium referenciaría por CDN, los apunta a rutas
+  locales file:// y guarda el HTML con `render(embedded=True)` (folium los
+  incrusta inline). `inline_fuentes` además incrusta las fuentes de los íconos
+  de marcadores (FontAwesome solid + glyphicons) como data URIs. Si la descarga
+  de assets falla (sin internet al generar), se guarda con el método normal
+  (CDN) como fallback.
 """
 
 import base64
@@ -31,6 +46,7 @@ import json
 import logging
 import math
 import os
+import re
 import urllib.request
 
 log = logging.getLogger("tiles_offline")
@@ -41,6 +57,7 @@ TILE_URL_CARTO = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
 SUBDOMINIOS = "abcd"
 ZOOMS_DEFAULT = [11, 12, 13]
 CACHE_DIR_DEFAULT = "tiles_cache"
+CACHE_DIR_ASSETS_DEFAULT = "assets_cache"
 # Zoom mínimo/máximo absolutos para el recorte del rango embebido.
 ZOOM_MIN_ABS = 4
 ZOOM_MAX_ABS = 18
@@ -305,23 +322,212 @@ def incrustar_tiles_vista_inicial(
         return 0
 
 
+# ---------------------------------------------------------------------------
+# Assets JS/CSS de Folium autocontenidos (cero red)
+# ---------------------------------------------------------------------------
+
+def _assets_folium() -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Listas (name, url) de los JS/CSS que Folium referencia por CDN.
+
+    Se leen de `folium.folium._default_js/_default_css` del Folium instalado
+    (0.20) para mantenerse en sync con la versión.
+    """
+    import folium.folium as _ff
+    return list(_ff._default_js), list(_ff._default_css)
+
+
+def _assets_fuentes(css_urls: list[str]) -> dict[str, str]:
+    """Deriva las URLs de las fuentes de íconos desde los CSS de Folium.
+
+    FontAwesome (all.min.css) → ../webfonts/fa-solid-900.woff2; glyphicons
+    (bootstrap-glyphicons.css) → ../fonts/glyphicons-halflings-regular.woff.
+    """
+    fuentes: dict[str, str] = {}
+    for url in css_urls:
+        if "fontawesome-free" in url:
+            base = url.rsplit("/", 2)[0]  # .../fontawesome-free@6.2.0
+            fuentes["fa-solid-900.woff2"] = base + "/webfonts/fa-solid-900.woff2"
+        elif "bootstrap-glyphicons" in url:
+            base = url.rsplit("/", 2)[0]  # .../bootstrap/3.0.0
+            fuentes["glyphicons-halflings-regular.woff"] = (
+                base + "/fonts/glyphicons-halflings-regular.woff"
+            )
+    return fuentes
+
+
+def _descargar_a(url: str, ruta: str) -> None:
+    """Descarga `url` a `ruta` (bytes) si no existe."""
+    if os.path.isfile(ruta):
+        return
+    req = urllib.request.Request(url, headers={"User-Agent": "flujos-assets-offline/1.0"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+        datos = resp.read()
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    with open(ruta, "wb") as f:
+        f.write(datos)
+
+
+def descargar_assets(cache_dir: str = CACHE_DIR_ASSETS_DEFAULT) -> None:
+    """Descarga/cachea los assets JS/CSS de Folium y las fuentes de íconos.
+
+    Los assets ya presentes en `cache_dir/` no se re-descargan. Los fallos
+    individuales se loguean y no abortan: `_assets_core_completos` decide si el
+    set quedó utilizable.
+    """
+    js, css = _assets_folium()
+    fuentes = _assets_fuentes([u for _, u in css])
+    os.makedirs(cache_dir, exist_ok=True)
+    pendientes: list[tuple[str, str]] = []
+    for name, url in js:
+        pendientes.append((os.path.join(cache_dir, "js", name), url))
+    for name, url in css:
+        pendientes.append((os.path.join(cache_dir, "css", name), url))
+    for nombre_font, url in fuentes.items():
+        pendientes.append((os.path.join(cache_dir, "fuentes", nombre_font), url))
+    nuevos = [p for p in pendientes if not os.path.isfile(p[0])]
+    if not nuevos:
+        return
+    log.info("Descargando %d assets offline...", len(nuevos))
+    for ruta, url in nuevos:
+        try:
+            _descargar_a(url, ruta)
+        except Exception as e:  # noqa: BLE001
+            log.warning("No se pudo descargar asset %s: %s", url, e)
+
+
+def _assets_core_completos(cache_dir: str = CACHE_DIR_ASSETS_DEFAULT) -> bool:
+    """True si están todos los JS/CSS de Folium (las fuentes son opcionales)."""
+    js, css = _assets_folium()
+    for name, _ in js:
+        if not os.path.isfile(os.path.join(cache_dir, "js", name)):
+            return False
+    for name, _ in css:
+        if not os.path.isfile(os.path.join(cache_dir, "css", name)):
+            return False
+    return True
+
+
+def _leer_texto(ruta: str) -> str:
+    with open(ruta, "rb") as f:
+        return f.read().decode("utf-8", errors="replace")
+
+
+def _reemplazar_script(html: str, url: str, contenido: str) -> str:
+    """Reemplaza <script src="url"></script> por <script>contenido</script>."""
+    return re.sub(
+        r'<script[^>]*src="' + re.escape(url) + r'"[^>]*></script>',
+        lambda m: "<script>" + contenido + "</script>",
+        html,
+    )
+
+
+def _reemplazar_link_css(html: str, url: str, contenido: str) -> str:
+    """Reemplaza <link ... href="url" .../> por <style>contenido</style>."""
+    return re.sub(
+        r'<link[^>]*href="' + re.escape(url) + r'"[^>]*>',
+        lambda m: "<style>" + contenido + "</style>",
+        html,
+    )
+
+
+def inline_fuentes(html: str, cache_dir: str = CACHE_DIR_ASSETS_DEFAULT) -> str:
+    """Reemplaza los url(...) de las fuentes de íconos por data URIs.
+
+    Tras incrustar los CSS inline, sus referencias relativas a fuentes
+    (`../webfonts/fa-solid-900.woff2`, `../fonts/glyphicons...woff`) quedarían
+    rotas en file://. Se reescriben a data:font/...;base64.
+    Las fuentes no descargadas simplemente no se reemplazan (íconos en blanco).
+    """
+    fuentes = _assets_fuentes([u for _, u in _assets_folium()[1]])
+    for nombre_font, _url in fuentes.items():
+        ruta = os.path.join(cache_dir, "fuentes", nombre_font)
+        if not os.path.isfile(ruta):
+            continue
+        with open(ruta, "rb") as f:
+            datos = f.read()
+        mime = "font/woff2" if nombre_font.endswith(".woff2") else "font/woff"
+        uri = f"data:{mime};base64," + base64.b64encode(datos).decode("ascii")
+        patron = re.compile(
+            r"url\(\s*(['\"]?)[^'\")]*" + re.escape(nombre_font) + r"\1\s*\)"
+        )
+        html = patron.sub(lambda m: f'url("{uri}")', html)
+    return html
+
+
+def guardar_autocontenido(
+    mapa,
+    ruta: str,
+    cache_dir: str = CACHE_DIR_ASSETS_DEFAULT,
+) -> bool:
+    """Guarda un mapa Folium como HTML 100% autocontenido (cero red).
+
+    Descarga (cache) los assets JS/CSS de Folium y las fuentes de íconos,
+    renderiza el mapa con el método normal (no `embedded=True`: folium propaga
+    el kwarg `embedded` a todos los hijos y `Marker.render()` no lo acepta) y
+    reemplaza en el HTML los tags `<script src>`/`<link href>` de CDN por su
+    contenido inline. Si el set de assets no está completo (p. ej. sin internet
+    al generar), guarda con `mapa.save(ruta)` normal (CDN).
+
+    Args:
+        mapa: objeto folium.Map ya construido.
+        ruta: ruta de salida del HTML.
+        cache_dir: carpeta de cache de assets.
+
+    Returns:
+        True si se guardó autocontenido; False si se usó el fallback CDN.
+    """
+    try:
+        descargar_assets(cache_dir)
+    except Exception as e:  # noqa: BLE001
+        log.warning("No se pudieron obtener assets offline; mapa con CDN: %s", e)
+        mapa.save(ruta)
+        return False
+    if not _assets_core_completos(cache_dir):
+        log.warning("Assets offline incompletos; mapa con CDN.")
+        mapa.save(ruta)
+        return False
+    js, css = _assets_folium()
+    html = mapa.get_root().render()
+    for name, url in js:
+        html = _reemplazar_script(
+            html, url, _leer_texto(os.path.join(cache_dir, "js", name))
+        )
+    for name, url in css:
+        html = _reemplazar_link_css(
+            html, url, _leer_texto(os.path.join(cache_dir, "css", name))
+        )
+    html = inline_fuentes(html, cache_dir)
+    with open(ruta, "w", encoding="utf-8") as f:
+        f.write(html)
+    return True
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Descarga los tiles de la vista inicial de una zona a la cache de disco."
+        description="Precarga tiles de la vista inicial y assets offline de Folium a disco."
     )
-    parser.add_argument("lat0", type=float, help="Latitud esquina 1")
-    parser.add_argument("lon0", type=float, help="Longitud esquina 1")
-    parser.add_argument("lat1", type=float, help="Latitud esquina 2")
-    parser.add_argument("lon1", type=float, help="Longitud esquina 2")
+    parser.add_argument("lat0", type=float, nargs="?", default=None, help="Latitud esquina 1")
+    parser.add_argument("lon0", type=float, nargs="?", default=None, help="Longitud esquina 1")
+    parser.add_argument("lat1", type=float, nargs="?", default=None, help="Latitud esquina 2")
+    parser.add_argument("lon1", type=float, nargs="?", default=None, help="Longitud esquina 2")
     parser.add_argument("--zooms", default="11,12,13", help="Zooms separados por coma")
     parser.add_argument("--cache-dir", default=CACHE_DIR_DEFAULT)
+    parser.add_argument("--assets", action="store_true",
+                        help="Solo descargar los assets JS/CSS/fuentes de Folium a assets_cache/")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    zooms = [int(z) for z in args.zooms.split(",")]
-    lat0, lon0, lat1, lon1 = _bounds_con_padding(args.lat0, args.lon0, args.lat1, args.lon1)
-    tiles = tiles_en_bounds(lat0, lon0, lat1, lon1, zooms)
-    pngs = descargar_tiles_png(tiles, args.cache_dir)
-    print(f"Tiles en cache: {len(pngs)}/{len(tiles)}")
+
+    if args.assets:
+        descargar_assets()
+        print(f"Assets offline: core completo={_assets_core_completos()}")
+    elif args.lat0 is not None:
+        zooms = [int(z) for z in args.zooms.split(",")]
+        lat0, lon0, lat1, lon1 = _bounds_con_padding(args.lat0, args.lon0, args.lat1, args.lon1)
+        tiles = tiles_en_bounds(lat0, lon0, lat1, lon1, zooms)
+        pngs = descargar_tiles_png(tiles, args.cache_dir)
+        print(f"Tiles en cache: {len(pngs)}/{len(tiles)}")
+    else:
+        parser.error("Indicá coordenadas o --assets")

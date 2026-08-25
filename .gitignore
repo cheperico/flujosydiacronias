@@ -7,6 +7,7 @@ logs/
 tmp/
 mapas/
 tiles_cache/
+assets_cache/
 tracks/
 .opencode/
 opencode.json

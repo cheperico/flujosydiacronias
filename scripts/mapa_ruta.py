@@ -46,6 +46,7 @@ if _PROJECT_ROOT not in sys.path:
 
 from scripts.track_gpx import cargar_tracks, medir_discrepancias, reportar_discrepancias  # noqa: E402
 from scripts.gradiente import haversine  # noqa: E402
+from scripts.tiles_offline import CACHE_DIR_ASSETS_DEFAULT, guardar_autocontenido  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -202,6 +203,7 @@ def generar_mapa(
     road_colors: bool = False,
     tolerancia_metros: int = 1000,
     umbral_gap_aviso: float = 1800,
+    assets_cache: str = CACHE_DIR_ASSETS_DEFAULT,
 ) -> str:
     """
     Genera un mapa HTML interactivo con Folium desde la base de datos.
@@ -219,6 +221,8 @@ def generar_mapa(
             GPS embebido de los medios (metadata/manual) y el track interpolado.
         umbral_gap_aviso: A partir de qué gap del track (s) se marca un medio
             como "posición incierta" en su popup y marcador (default 1800).
+        assets_cache: Carpeta de cache de assets JS/CSS de Folium (el HTML se
+            guarda 100% autocontenido, sin CDN; fallback CDN si falla).
     Returns:
         Ruta absoluta del archivo HTML generado, o None si no hay datos.
 
@@ -346,8 +350,8 @@ def generar_mapa(
     # ---- Guardar ----
     output_abs = os.path.abspath(output)
     os.makedirs(os.path.dirname(output_abs), exist_ok=True)
-    m.save(output_abs)
-    log.info("Mapa guardado: %s", output_abs)
+    autocontenido = guardar_autocontenido(m, output_abs, assets_cache)
+    log.info("Mapa guardado: %s (%s)", output_abs, "autocontenido" if autocontenido else "CDN")
 
     n_con_grad = sum(1 for p in puntos if p["gradiente"] is not None)
     n_con_dist = sum(1 for p in puntos if p["distancia_m"] is not None)
@@ -629,6 +633,11 @@ Ejemplos:
         default=1800,
         help="Gap del track (s) a partir del cual un medio se marca como posición incierta (default: 1800)",
     )
+    parser.add_argument(
+        "--assets-cache",
+        default=CACHE_DIR_ASSETS_DEFAULT,
+        help=f"Carpeta de cache de assets JS/CSS de Folium (default: {CACHE_DIR_ASSETS_DEFAULT})",
+    )
     args = parser.parse_args(argv)
 
     # Resolver ruta de DB
@@ -654,6 +663,7 @@ Ejemplos:
         road_colors=args.road_colors,
         tolerancia_metros=args.tolerancia_metros,
         umbral_gap_aviso=args.umbral_gap_aviso,
+        assets_cache=args.assets_cache,
     )
 
     if resultado:

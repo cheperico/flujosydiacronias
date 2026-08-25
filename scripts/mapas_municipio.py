@@ -39,9 +39,19 @@ Tiles de la vista inicial:
     como data URIs base64 (scripts/tiles_offline.py). Al abrir el mapa en
     TouchDesigner (Web Render TOP sobre file://) la vista inicial se muestra al
     instante, sin descargar de internet; el zoom/desplazamiento posterior sigue
-    usando la capa base online. No requiere servidor. Los tiles se cachean en
+    usando la capa online. No requiere servidor. Los tiles se cachean en
     `tiles_cache/` (compartido entre municipios). Flag --no-embebido para
     deshabilitarlo.
+
+HTML autocontenido (assets):
+    Además de los tiles, el HTML se guarda con `guardar_autocontenido`
+    (scripts/tiles_offline.py): los JS/CSS que Folium referencia por CDN
+    (Leaflet, jQuery, Bootstrap, FontAwesome, awesome-markers) y las fuentes de
+    los íconos de marcadores se incrustan inline en el propio HTML → el mapa se
+    abre en TD con CERO red (el Web Render TOP usa CEF con cache temporal por
+    TOP, por eso cada mapa re-descargaba los CDN). Si la descarga de assets
+    falla (sin internet al generar), se guarda con el método normal (CDN).
+    Los assets se cachean en `assets_cache/`.
 """
 
 import argparse
@@ -88,8 +98,10 @@ from scripts.mapa_ruta import (  # noqa: E402
 )
 from scripts.gradiente import haversine  # noqa: E402
 from scripts.tiles_offline import (  # noqa: E402
+    CACHE_DIR_ASSETS_DEFAULT,
     CACHE_DIR_DEFAULT,
     ZOOMS_DEFAULT,
+    guardar_autocontenido,
     incrustar_tiles_vista_inicial,
 )
 from scripts.track_gpx import (  # noqa: E402
@@ -517,6 +529,7 @@ def generar_mapas(
     embebido: bool = True,
     zooms: list[int] | None = None,
     tiles_cache: str = CACHE_DIR_DEFAULT,
+    assets_cache: str = CACHE_DIR_ASSETS_DEFAULT,
 ) -> dict:
     """Genera los mapas por municipio y devuelve estadísticas.
 
@@ -533,6 +546,8 @@ def generar_mapas(
             vista inicial del municipio como data URIs (sin red al abrir).
         zooms: rango de zooms a incrustar (default ZOOMS_DEFAULT: 11-13).
         tiles_cache: carpeta de cache de tiles descargados.
+        assets_cache: carpeta de cache de assets JS/CSS de Folium (el HTML se
+            guarda 100% autocontenido, sin CDN; fallback CDN si falla).
 
     Returns:
         Dict con: total_municipios, total_archivos, generados, saltados, errores.
@@ -644,10 +659,11 @@ def generar_mapas(
                 n_tiles = _incrustar_tiles_vista_inicial(
                     mapa, puntos, embebido=embebido, zooms=zooms, tiles_cache=tiles_cache
                 )
-                mapa.save(ruta)
+                autocontenido = guardar_autocontenido(mapa, ruta, assets_cache)
                 generados += 1
-                log.info("Generado: %s (%d puntos, tramo track: %d, %d tiles embebidos)",
-                         nombre, len(puntos), len(tramo), n_tiles)
+                log.info("Generado: %s (%d puntos, tramo track: %d, %d tiles embebidos, %s)",
+                         nombre, len(puntos), len(tramo), n_tiles,
+                         "autocontenido" if autocontenido else "CDN")
             except Exception as e:
                 errores += 1
                 log.error("Error generando %s (%s): %s", muni, var, e)
@@ -743,6 +759,11 @@ Ejemplos:
         default=CACHE_DIR_DEFAULT,
         help=f"Carpeta de cache de tiles (default: {CACHE_DIR_DEFAULT})",
     )
+    parser.add_argument(
+        "--assets-cache",
+        default=CACHE_DIR_ASSETS_DEFAULT,
+        help=f"Carpeta de cache de assets JS/CSS de Folium (default: {CACHE_DIR_ASSETS_DEFAULT})",
+    )
     args = parser.parse_args(argv)
 
     # Resolver ruta de DB
@@ -795,6 +816,7 @@ Ejemplos:
         embebido=not args.no_embebido,
         zooms=zooms,
         tiles_cache=args.tiles_cache,
+        assets_cache=args.assets_cache,
     )
 
     if resultado["generados"] > 0:

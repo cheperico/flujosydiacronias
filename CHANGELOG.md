@@ -7,6 +7,23 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 44] — 2026-08-25
+
+### Añadido
+- **HTML de mapas 100% autocontenido (cero red)** (`scripts/tiles_offline.py` + `scripts/mapas_municipio.py` + `scripts/mapa_ruta.py`): aunque los tiles de la vista inicial ya viajaban incrustados, cada mapa seguía cargando en runtime **10 assets JS/CSS de Folium desde CDN** (Leaflet, jQuery, Bootstrap, FontAwesome, awesome-markers) en `<head>` — bloqueantes para inicializar el mapa. El Web Render TOP de TouchDesigner usa **CEF con un proceso de navegador separado por TOP y una cache temporal que se borra al salir** → cada mapa re-descargaba esos CDN desde cero (con N TOPs = N×10 conexiones), y la página quedaba en blanco hasta resolverlos. Ahora los HTML se guardan autocontenidos:
+  - `tiles_offline.py`: `descargar_assets` (cache en `assets_cache/`, regenerable) baja los JS/CSS que Folium referencia por CDN (leídos de `folium.folium._default_js/_default_css` para ir en sync) + las fuentes de íconos (FontAwesome solid `fa-solid-900.woff2`, glyphicons `.woff`); `inline_fuentes` reescribe los `url(../webfonts/…)`/`url('../fonts/…')` rotos a **data URIs**; `guardar_autocontenido` reemplaza los tags `<script src>`/`<link href>` de CDN por su contenido inline (render normal, **no** `embedded=True` — folium propaga ese kwarg a todos los hijos y `Marker.render()` no lo acepta).
+  - **Sin servidor ni cambios en TD**: los HTML son autocontenidos y se abren al instante en `file://`, independientes de internet/CDN.
+  - `mapas_municipio.py` y `mapa_ruta.py` guardan con `guardar_autocontenido` (flag `--assets-cache`; fallback CDN si la descarga de assets falla al generar).
+  - **Migración**: regenerados los 297 mapas (296 municipio + 1 ruta), 0 errores. Verificado: **0** archivos con refs CDN, fuentes inline, total 545 MB (mediana 1.6 MB).
+
+### Documentación
+- **AGENTS.md**: filas de `mapas_municipio.py`, `mapa_ruta.py` y `tiles_offline.py` (autocontenido + `--assets-cache`).
+- **README.md**: filas y árbol de los scripts de mapas.
+- **`docs/retorno_fluir_td.md`**: nota del bloque `/mapa` (HTML autocontenido, cero red).
+- **`.gitignore`**: `assets_cache/`.
+
+---
+
 ## [Entrega 43] — 2026-08-25
 
 Revisión completa del proyecto contra su documentación y actualización de la misma.
