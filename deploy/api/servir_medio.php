@@ -121,7 +121,52 @@ if ($esThumb) {
     // Si no se pudo redimensionar, servir original pero con Content-Type
 }
 
+$tamano = filesize($path);
+$inicio = 0;
+$fin    = $tamano - 1;
+
+header('Accept-Ranges: bytes');
+if (isset($_SERVER['HTTP_RANGE']) && preg_match('/bytes=(\d*)-(\d*)/', $_SERVER['HTTP_RANGE'], $m)) {
+    $r0 = $m[1] !== '' ? (int)$m[1] : null;
+    $r1 = $m[2] !== '' ? (int)$m[2] : null;
+    if ($r0 === null && $r1 === null) {
+        $r0 = 0; $r1 = $tamano - 1;
+    } elseif ($r0 === null) {          // rango sufijo: bytes=-N
+        $n = (int)$m[2];
+        $r1 = $tamano - 1;
+        $r0 = max(0, $tamano - $n);
+    } else {                            // rango desde start
+        if ($r1 === null) $r1 = $tamano - 1;
+    }
+    if ($r0 > $r1 || $r0 >= $tamano) {
+        http_response_code(416);
+        header('Content-Range: bytes */' . $tamano);
+        exit;
+    }
+    if ($r1 >= $tamano) $r1 = $tamano - 1;
+    $inicio = $r0;
+    $fin    = $r1;
+    http_response_code(206);
+    header('Content-Range: bytes ' . $inicio . '-' . $fin . '/' . $tamano);
+}
+
+$longitud = $fin - $inicio + 1;
 header('Content-Type: ' . $mime);
-header('Content-Length: ' . filesize($path));
+header('Content-Length: ' . $longitud);
 header('Cache-Control: public, max-age=86400');
-readfile($path);
+
+$fp = fopen($path, 'rb');
+if ($fp === false) {
+    http_response_code(500);
+    exit;
+}
+if ($inicio > 0) fseek($fp, $inicio);
+$restante = $longitud;
+while ($restante > 0 && !feof($fp)) {
+    $trozo = fread($fp, min(65536, $restante));
+    if ($trozo === false) break;
+    echo $trozo;
+    $restante -= strlen($trozo);
+}
+fclose($fp);
+exit;

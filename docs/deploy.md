@@ -68,10 +68,12 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
    Lee `db/flujos.db` y **recrea** `visualizacion.db` por completo (medios,
    categorias, telegram_messages).
    - **Deploy genérico (default)**: escribe en `deploy/` (raíz del proyecto)
-     copiando los medios a `deploy/media/...` y transcodificando videos
-     grandes/360° a MP4/H.264 web (por defecto activo; `--no-transcode` solo
-     copia). `--deploy-dir <carpeta>` cambia el destino; `--dry-run`
-     previsualiza sin escribir.
+     copiando los medios a `deploy/media/...`. `--transcode` transcodifica videos
+     grandes/360° a MP4/H.264 web (opt-in; sin él solo copia tal cual).
+     `--transcode-360-largo 1440` (default) deja los 360 en 1440×720 con tope de
+     bitrate y keyframes para seek. El export es **incremental** (skip-if-exists:
+     no re-transcodifica archivos ya presentes). `--deploy-dir <carpeta>` cambia
+     el destino; `--dry-run` previsualiza sin escribir.
    - **Snapshot local (dev)**: `--snapshot-local` escribe
      `deploy/db/visualizacion.db` con rutas absolutas de Windows, **sin** copiar
      medios ni transcodificar. ⚠️ Al compartir archivo con el modo deploy, el
@@ -102,8 +104,8 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 
 | Endpoint | Recibe (GET) | Devuelve |
 |---|---|---|
-| `medios_filtrados.php` | `limite` (1–20), `tipo` (csv), `municipio`, `color`, `provincia`, `tag`, `horas` (todos aceptan csv; `horas` filtra por franja `[min,max]` en hora local) | resultados agrupados por tipo (incluye `titulo` para textos) |
-| `servir_medio.php` | `id` (obligatorio), `thumb` (opcional) | archivo binario (MIME, cache 86400 s) |
+| `medios_filtrados.php` | `limite` (1–20), `tipo` (csv), `municipio`, `color`, `provincia`, `tag`, `horas`, `subtipo` (todos aceptan csv; `horas` filtra por franja `[min,max]` en hora local; `subtipo` p. ej. `360`) | resultados agrupados por tipo (incluye `titulo` para textos) |
+| `servir_medio.php` | `id` (obligatorio), `thumb` (opcional) | archivo binario con **HTTP Range** (`206`/`416`, `Accept-Ranges`) — necesario para `<video>` |
 | `tags.php` | `limite` (10–100, default 40) | `{total, tags:[{tag, frecuencia, peso}]}` |
 
 > **Nota — nube de tags**: `tags.php` arma la nube contando las **keywords**
@@ -132,11 +134,28 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 > `((h−3+24) mod 24)`. Sin `horas` → sin filtro horario. Los **textos** no tienen
 > `timestamp_utc` (crónicas históricas) → `hora` NULL → se excluyen cuando hay
 > filtro de horas. Limitación conocida: sin cruce de medianoche (22 y 2 → franja
-> 2–22 amplia). El bloque **Videos** ahora se llena con los filtros (lista de
-> descripciones; reproducción pendiente).
+> 2–22 amplia). El bloque **Videos** muestra los videos regulares (sin 360) como
+> lista de descripciones; los **360°** tienen su propio bloque con visor.
 
 > `loop.php` (que servía `spec.json`) se movió a `pruebas/` junto con
 > `prueba_loop.html`: la SPA del deploy NO consume la spec del motor.
+
+---
+
+## Videos 360° (bloque + visor)
+
+- **Bloque "Videos 360°"**: lista de los videos `subtipo='360'` filtrados por los
+  mismos chips (vía `medios_filtrados.php?tipo=video&subtipo=360`). Cada ítem con
+  badge **360°** + duración; click abre el **visor fullscreen**.
+- **Visor** (`app.js`): Three.js local (`js/three.min.js`, vendored, UMD 0.147).
+  Esfera `SphereGeometry` + `VideoTexture` + `BackSide`, cámara adentro; **drag**
+  para mirar, **rueda** para zoom (fov 30–110), auto-rotación en reposo; al
+  cerrar pausa el video y libera la escena.
+- **Reproducción**: `servir_medio.php` soporta HTTP Range (206/416) → streaming y seek.
+- **Contenido**: los 44 videos 360 (3840×1920, `subtype='360'` +
+  `xmp_spherical=True`) se identifican por `subtipo='360'`. Requieren estar
+  transcodificados en `deploy/media/<carpeta>/` (correr el exportador con
+  `--transcode`).
 
 ---
 
@@ -155,10 +174,12 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
   (clave `ia_description` de `media_metadata` en la principal).
 - **Sin resultados en filtros**: si un filtro (p. ej. horas nocturnas) no encuentra
   medios, los bloques muestran "—". Pendiente decidir qué hacer en ese caso.
-- **No se reproducen videos** (ni 360°): el bloque "Videos" del lienzo es solo
-  una lista de descripciones; `servir_medio.php` sirve con `readfile()` sin HTTP
-  Range (imprescindible para `<video>`). Opciones para visor 360° en
-  `docs/videos_360_web.md` (pendiente).
+- **Videos regulares no se reproducen**: el bloque "Videos" sigue siendo lista de
+  descripciones (solo el bloque **Videos 360°** reproduce). Pendiente: `<video>`
+  inline para regulares (el Range ya está soportado).
+- **Contenido 360°**: el visor necesita los archivos transcodificados en
+  `deploy/media/` (hoy hay un subset de demo). Para el set completo correr el
+  exportador con `--transcode` (ver "Cómo regenerar").
 
 ---
 

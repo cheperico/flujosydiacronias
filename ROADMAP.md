@@ -104,9 +104,9 @@ Etapa 5: INSTALACIÓN          →  TouchDesigner + motor de deriva
 
 | Item | Prioridad | Estado |
 |---|---|---|
-| **Reproducción de videos en la web** (hoy el bloque Videos es solo una lista de descripciones; sin `<video>` en el lienzo) | Media | ❌ Pendiente |
-| **Visualización de videos 360° equirectangulares**: opciones documentadas en `docs/videos_360_web.md` (Three.js esfera / WebGL custom / A-Frame / librerías nicho). Requiere: flag `es_360` en el snapshot (`exportar_visualizacion.py`), soporte HTTP Range en `servir_medio.php`, transcode `--transcode --transcode-360-largo 1920`, y renderer 360 en `app.js`. Recomendación: Three.js local | Media | ❌ Pendiente (documentado 2026-08-15) |
-| **Detección de videos 360 reales**: 139 videos, 0 marcados `xmp_spherical`; correr ffprobe (aspecto 2:1 / ancho ≥ 3840 / metadata esférica) y marcar en DB los que correspondan | Media | ❌ Pendiente |
+| **Reproducción de videos en la web** (hoy el bloque Videos es solo una lista de descripciones; sin `<video>` en el lienzo; el Range ya está soportado) | Media | ❌ Pendiente (regulares) / ✅ 360° |
+| **Visualización de videos 360° equirectangulares**: **implementado 2026-08-25** — bloque "Videos 360°" + visor Three.js local (`js/three.min.js`), HTTP Range en `servir_medio.php`, param `subtipo` en `medios_filtrados.php`, transcode `--transcode --transcode-360-largo 1440` (con skip-if-exists). Detalle en `docs/videos_360_web.md` | Media | ✅ Implementado (falta transcode completo de los 44) |
+| **Detección de videos 360 reales**: **44 videos marcados** `subtype='360'` + `xmp_spherical=True` (censo 2026-08-25) | Media | ✅ Resuelto |
 
 ---
 

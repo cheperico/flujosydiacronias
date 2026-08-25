@@ -199,9 +199,20 @@ def _transcodificar_video(fuente: str, destino: str, ancho: int, alto: int,
     Transcodifica un video a MP4/H.264 web en el destino. Devuelve los
     segundos que tardó, o None si falló (borra el destino parcial).
     """
+    # Tope de bitrate según resolución (para tamaño predecible en hosting compartido).
+    pixeles = ancho * alto
+    if pixeles > 1200000:
+        maxrate, bufsize = '4500k', '9000k'
+    elif pixeles > 700000:
+        maxrate, bufsize = '3000k', '6000k'
+    else:
+        maxrate, bufsize = '2000k', '4000k'
+
     cmd = [ffmpeg, '-y', '-i', fuente,
            '-vf', f'scale={ancho}:{alto}', '-r', '30',
            '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
+           '-maxrate', maxrate, '-bufsize', bufsize,
+           '-g', '60', '-sc_threshold', '0',
            '-profile:v', 'main', '-level', '4.1']
     if tiene_audio:
         cmd += ['-c:a', 'aac', '-b:a', '128k']
@@ -284,6 +295,7 @@ def _copiar_y_transcodificar_medios(flujos_db: str, deploy_dir: str, transcode: 
         'videos_360': 0,
         'videos_regulares': 0,
         'videos_transcodificados': 0,
+        'omitidos_existente': 0,
     }
 
     if dry_run:
@@ -306,6 +318,21 @@ def _copiar_y_transcodificar_medios(flujos_db: str, deploy_dir: str, transcode: 
             stats['faltantes'] += 1
             log.warning("Fuente no existe (id %s): %s", r['id'], origen)
             continue
+
+        # Skip-if-exists: si el destino ya existe y es igual o más nuevo que la
+        # fuente, no se reprocesa (export incremental).
+        if os.path.exists(destino):
+            try:
+                destino_mas_nuevo = os.path.getmtime(destino) >= os.path.getmtime(origen)
+            except OSError:
+                destino_mas_nuevo = False
+            if destino_mas_nuevo:
+                stats['omitidos_existente'] += 1
+                try:
+                    mapa_tamanos[r['id']] = os.path.getsize(destino)
+                except OSError:
+                    pass
+                continue
 
         # Garantizar el directorio destino antes de copiar o transcodificar.
         if not dry_run:
@@ -366,6 +393,7 @@ def _copiar_y_transcodificar_medios(flujos_db: str, deploy_dir: str, transcode: 
         log.info("  Se transcodificarían: %d videos (360°: %d, regulares: %d)",
                  stats['videos_360'] + stats['videos_regulares'],
                  stats['videos_360'], stats['videos_regulares'])
+        log.info("  Omitidos (ya existentes): %d", stats['omitidos_existente'])
         if not transcode:
             log.info("  Transcode no activado (--transcode): los videos se copian tal cual.")
         if stats['faltantes']:
@@ -378,6 +406,7 @@ def _copiar_y_transcodificar_medios(flujos_db: str, deploy_dir: str, transcode: 
     log.info("  Videos transcodificados: %d (360°: %d, regulares: %d)",
              stats['videos_transcodificados'], stats['videos_360'], stats['videos_regulares'])
     log.info("  Omitidos (type='text'): %d", stats['omitidos_texto'])
+    log.info("  Omitidos (ya existentes): %d", stats['omitidos_existente'])
     if stats['faltantes']:
         log.warning("  Fuentes faltantes (no copiados): %d", stats['faltantes'])
     return mapa_tamanos
@@ -399,8 +428,8 @@ def main(argv: list[str] | None = None) -> None:
                              "solo se copian tal cual).")
     parser.add_argument('--transcode-box', default='1280x720',
                         help="Caja destino para videos regulares sobredimensionados (WxH). Default: 1280x720.")
-    parser.add_argument('--transcode-360-largo', type=int, default=1920,
-                        help="Lado mayor para videos 360° equirectangulares. Default: 1920.")
+    parser.add_argument('--transcode-360-largo', type=int, default=1440,
+                        help="Lado mayor para videos 360° equirectangulares. Default: 1440.")
     parser.add_argument('--dry-run', action='store_true',
                         help="Previsualizar (deploy) sin copiar ni escribir.")
     args = parser.parse_args(argv)

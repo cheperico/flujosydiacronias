@@ -1,6 +1,7 @@
 # Videos 360° equirectangulares en la web — opciones
 
-> Documento de opciones (2026-08-15). Pendiente de decisión e implementación.
+> Documento de opciones (2026-08-15). **Implementado 2026-08-25** (Three.js local
+> + bloque "Videos 360°"); ver la sección "Implementación" al final.
 > Item de roadmap: "Visualización web (deploy)" en `ROADMAP.md`.
 
 ## Problema
@@ -93,3 +94,25 @@ WebGL custom queda como alternativa si se quiere cero dependencias absolutas.
   marcar `xmp_spherical` en la DB para que el pipeline los trate como 360
   (hoy 0 marcados).
 - Elegir enfoque (A/B/C/D) según la prioridad de la instalación.
+
+---
+
+## Implementación (2026-08-25)
+
+- **Opción elegida**: **A) Three.js local** (`deploy/js/three.min.js`, UMD 0.147,
+  vendored, sin CDN ni build).
+- **Bloque "Videos 360°"** en el lienzo: lista de `subtipo='360'` filtrada por los
+  mismos chips que el resto de los medios; click → **visor fullscreen** (esfera
+  `BackSide` + `VideoTexture`, drag para mirar, rueda para zoom, auto-rotación en
+  reposo; al cerrar pausa y libera la escena).
+- **`servir_medio.php`**: soporte HTTP Range (`206`/`416`, `Accept-Ranges`) →
+  streaming y seek del `<video>`.
+- **`medios_filtrados.php`**: param `subtipo` (csv) para pedir solo los 360.
+- **Exportador** (`exportar_visualizacion.py`): `--transcode` deja los 360 en
+  1440×720 (default `--transcode-360-largo 1440`), tope de bitrate
+  (4500k/3000k/2000k según píxeles), `-g 60 -sc_threshold 0` para seek, y
+  **skip-if-exists** (export incremental: no re-transcodifica archivos presentes).
+- Los 44 videos 360 están en la DB (`subtype='360'` + `xmp_spherical=True`);
+  para reproducirlos en la web hay que transcodificarlos a `deploy/media/<carpeta>/`:
+  `python scripts/exportar_visualizacion.py --transcode`.
+- Vuelos regulares: el bloque "Videos" sigue como lista (reproducción inline pendiente).

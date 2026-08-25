@@ -7,6 +7,31 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 42] — 2026-08-25
+
+### Añadido
+- **Bloque "Videos 360°" en el lienzo web** (`deploy/`): lista de videos `subtipo='360'` filtrada por los mismos chips (segundo fetch `tipo=video&subtipo=360` en `cargarMediosFiltrados`) y **visor fullscreen** con **Three.js local** (`deploy/js/three.min.js`, UMD 0.147, vendored). Esfera `SphereGeometry` + `VideoTexture` (`BackSide`), cámara en el centro; drag para mirar, rueda para zoom (fov 30–110), auto-rotación en reposo; al cerrar pausa el video y libera la escena. El bloque "Videos" regular excluye los 360.
+- **HTTP Range en `servir_medio.php`** (`206`/`416`, `Accept-Ranges`): streaming y seek para `<video>` (imprescindible para el visor 360).
+- **Filtros conectados a todos los medios**: `medios_filtrados.php` acepta `horas` (franja `[min,max]` en hora local Argentina UTC−3, convirtiendo el `hora` UTC del snapshot) y `subtipo` (csv). En `app.js` el fetch incluye `video`, los toggles recargan los medios **en vivo** (`cargarMediosFiltrados` en color/hora/provincia/municipio/tag) y el bloque Videos se re-renderiza.
+- **Fix hosting de rutas**: `servir_medio.php` resuelve como fallback `media/<carpeta>/<archivo>` (la DB snapshot-local guarda rutas absolutas de Windows que no existen en hosting → 404 de imágenes y audios; el fallback los sirve desde `deploy/media/`).
+- **Mapa Leaflet en el lienzo**: `deploy/vendor/leaflet/` (vendored) + `recorrido.php` devuelve `latitud, longitud, keywords` (bloque Mapa).
+
+### Cambiado
+- **Exportador** (`scripts/exportar_visualizacion.py`): **skip-if-exists** (export incremental, no re-transcodifica archivos presentes), default `--transcode-360-largo` **1920→1440** (360 en 1440×720), tope de bitrate por píxeles (`-maxrate`/`-bufsize`) y keyframes para seek (`-g 60 -sc_threshold 0`). Censo: **44 videos 360** (3840×1920, `subtype='360'` + `xmp_spherical=True`).
+
+### Documentación
+- **`docs/deploy.md`**: endpoints (`horas`, `subtipo`, Range), sección "Videos 360°", nota de filtro por horas, gaps actualizados (regulares siguen como lista; contenido 360 requiere `--transcode`), fix del flag `--transcode` mal documentado.
+- **`docs/videos_360_web.md`**: de "pendiente" a implementado (opción Three.js local, bloque, visor, transcode).
+- **`docs/visualizaciones.md`**: sección "Filtros conectados a todos los medios" + bloque "Videos 360°".
+- **`ROADMAP.md`**: 360° y detección de videos 360 → implementados.
+
+### Pendiente
+- Transcode completo de los 44 360 a `deploy/media/` (`python scripts/exportar_visualizacion.py --transcode`, ~varias horas); hoy solo un subset de demo es reproducible.
+- Videos regulares: reproducción inline pendiente (el Range ya está soportado).
+- Fase "compleja" de filtros: cruce de medianoche en horas y qué hacer cuando no hay medios.
+
+---
+
 ## [Entrega 41] — 2026-08-25
 
 ### Añadido

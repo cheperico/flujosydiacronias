@@ -7,6 +7,7 @@
  *   provincia (string, opcional; acepta valores separados por coma)
  *   tag       (string, opcional; acepta valores separados por coma)
  *   horas     (string, opcional; valores 0..23 separados por coma; filtra por franja [min,max] en hora local Argentina UTC-3)
+ *   subtipo   (string, opcional; acepta valores separados por coma, ej: 360)
  *   tipo      (string, opcional: image,video,audio,text — separado por coma;
  *              'text' devuelve los medios type='text' (textos del viaje))
  *   limite    (int, opcional, default 20)
@@ -21,6 +22,7 @@ $color     = isset($_GET['color'])     ? trim($_GET['color'])     : '';
 $provincia = isset($_GET['provincia']) ? trim($_GET['provincia']) : '';
 $tag       = isset($_GET['tag'])       ? trim($_GET['tag'])       : '';
 $horas     = isset($_GET['horas'])    ? trim($_GET['horas'])     : '';
+$subtipo   = isset($_GET['subtipo'])  ? trim($_GET['subtipo'])   : '';
 $tipoStr   = isset($_GET['tipo'])      ? trim($_GET['tipo'])      : '';
 $limite    = isset($_GET['limite'])    ? max(1, min(20, (int)$_GET['limite'])) : 5;
 
@@ -57,6 +59,7 @@ $municipios = valores_param($municipio);
 $colores = valores_param($color);
 $provincias = valores_param($provincia);
 $tags = valores_param($tag);
+$subtipos = valores_param($subtipo);
 
 $horasSelec = [];
 foreach (valores_param($horas) as $hv) {
@@ -69,6 +72,7 @@ $horasSelec = array_values(array_unique($horasSelec));
 
 agregar_in($condiciones, $params, 'm.municipio', 'municipio', $municipios);
 agregar_in($condiciones, $params, 'm.provincia', 'provincia', $provincias);
+agregar_in($condiciones, $params, 'm.subtipo', 'subtipo', $subtipos);
 
 if (count($colores)) {
     $partesColor = [];
@@ -150,6 +154,7 @@ echo json_encode([
         'provincia' => $provincia,
         'tag'       => $tag,
         'horas'     => $horasSelec,
+        'subtipo'   => $subtipos,
         'tipos'     => $tipos,
         'limite'    => $limite
     ],

@@ -50,6 +50,7 @@
     var TAGS_API = null;
     var tagsSeleccionados = [];
     var MEDIOS_FILTRADOS = null;
+    var MEDIOS_360 = null;
     var MEDIOS_REQUEST_ID = 0;
     var MENSAJES_TELEGRAM = null;
     var MENSAJES_TELEGRAM_MUNICIPIO = '';
@@ -93,6 +94,15 @@
         ultimoInicio: -1
     };
 
+    // Mapa Leaflet del bloque "Mapa": se inicializa una vez y se re-filtra
+    // client-side con los mismos chips que los medios.
+    var MAPA = {
+        map: null,
+        grupo: null,     // layerGroup de marcadores
+        ctrl: null,      // contenedor del selector por municipio
+        view: 'todos'    // municipio puntual o 'todos'
+    };
+
     // Rotador de textos: muestra UN texto completo durante 30s y luego el siguiente.
     var TEXTO_ROTADOR = {
         items: [],
@@ -127,9 +137,10 @@
         { id: 'tags',        tipo: 'selector', titulo: 'Tags',        w: 500, h: 380 },
         { id: 'imagenes',    tipo: 'media',    titulo: 'Im\u00e1genes', w: 860, h: 620 },
         { id: 'videos',      tipo: 'media',    titulo: 'Videos',      w: 520, h: 380 },
+        { id: 'videos360',   tipo: 'media',    titulo: 'Videos 360\u00b0', w: 520, h: 400 },
         { id: 'textos',      tipo: 'media',    titulo: 'Textos',      w: 420, h: 300 },
         { id: 'sonidos',     tipo: 'media',    titulo: 'Sonidos',     w: 340, h: 240 },
-        { id: 'mapa',        tipo: 'media',    titulo: 'Mapa',        w: 520, h: 380 },
+        { id: 'mapa',        tipo: 'media',    titulo: 'Mapa',        w: 560, h: 420 },
         { id: 'comunicacion', tipo: 'media',   titulo: 'Comunicaci\u00f3n', w: 480, h: 420 }
     ];
 
@@ -323,7 +334,7 @@
         BLOQUES.forEach(function(b) { area += b.w * b.h; });
         var anchoMax = Math.round(Math.sqrt(area * 1.5));
         var ids = shuffle(
-            ['imagenes', 'videos', 'textos', 'sonidos', 'mapa', 'comunicacion',
+            ['imagenes', 'videos', 'videos360', 'textos', 'sonidos', 'mapa', 'comunicacion',
              'colores', 'horas', 'provincias', 'municipios', 'tags']
         );
 
@@ -371,6 +382,7 @@
                 el = document.createElement('div');
                 el.id = 'bloque-' + b.id;
                 el.className = 'bloque' + (b.tipo === 'media' ? ' bloque-media' : '') + (b.tipo === 'selector' ? ' bloque-selector' : '');
+                if (b.id === 'mapa') el.className += ' bloque-mapa';
                 el.innerHTML = '<div class="bloque-titulo">' + b.titulo + '</div>'
                             + '<div class="bloque-contenido"></div>';
                 mundo.appendChild(el);
@@ -399,11 +411,17 @@
             case 'sonidos':
                 renderMediosLista(id, cont);
                 break;
+            case 'videos360':
+                renderVideos360(cont);
+                break;
             case 'textos':
                 renderTextos(cont);
                 break;
             case 'comunicacion':
                 renderComunicacion(cont);
+                break;
+            case 'mapa':
+                renderMapa(cont);
                 break;
             default:
                 cont.innerHTML = '';
@@ -494,6 +512,8 @@
         var tipo = tipoMap[id] || id;
         var items = (MEDIOS_FILTRADOS && MEDIOS_FILTRADOS.resultados && MEDIOS_FILTRADOS.resultados[tipo])
                     ? MEDIOS_FILTRADOS.resultados[tipo] : [];
+        // Excluir videos 360 de la lista regular (tienen su propio bloque)
+        if (tipo === 'video') items = items.filter(function(i){ return i.subtipo !== '360'; });
 
         if (!items.length) {
             if (tipo === 'audio') limpiarSeleccionAudios();
@@ -733,6 +753,152 @@
         var cont = bloque.querySelector('.bloque-contenido');
         if (!cont) return;
         renderComunicacion(cont, VENTANA_CHAT.inicio, VENTANA_CHAT.tamano);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  MAPA — Leaflet integrado, filtrado por los chips
+    // ═══════════════════════════════════════════════════════
+
+    // Filtra los puntos de recorrido.php con los mismos chips que los medios.
+    // Devuelve los puntos con lat/lon válidas que coinciden con la selección.
+    function puntosFiltradosMapa() {
+        var puntos = (DATOS_API && DATOS_API.puntos) ? DATOS_API.puntos : [];
+        var munis = municipiosSeleccionados;
+        var provs = provinciasSeleccionadas;
+        var cols = coloresSeleccionados;
+        var tags = tagsSeleccionados;
+        var horas = horasSeleccionadas;
+
+        var tagLower = tags.map(function(t) { return t.toLowerCase(); });
+
+        return puntos.filter(function(p) {
+            if (p.latitud === null || p.latitud === undefined ||
+                p.longitud === null || p.longitud === undefined) return false;
+            if (munis.length && munis.indexOf(p.municipio) === -1) return false;
+            if (provs.length && provs.indexOf(p.provincia) === -1) return false;
+            if (cols.length) {
+                var c1 = p.color_1, c2 = p.color_2, c3 = p.color_3;
+                var ok = cols.some(function(c) {
+                    return c === c1 || c === c2 || c === c3;
+                });
+                if (!ok) return false;
+            }
+            if (tagLower.length) {
+                var kw = (p.keywords || '').toLowerCase();
+                var okTag = tagLower.some(function(t) {
+                    return kw.indexOf(t) !== -1;
+                });
+                if (!okTag) return false;
+            }
+            if (horas.length) {
+                // Franja [min,max] en hora local Argentina (UTC-3), igual que el PHP.
+                var hh = parseInt((p.hora || '').slice(0, 2), 10);
+                if (isNaN(hh)) return false;
+                var local = ((hh - 3 + 24) % 24);
+                var hmin = Math.min.apply(null, horas);
+                var hmax = Math.max.apply(null, horas);
+                if (local < hmin || local > hmax) return false;
+            }
+            return true;
+        });
+    }
+
+    // Crea los marcadores para el conjunto de puntos dado y los encuadra.
+    function dibujarPuntosMapa(puntos) {
+        if (!MAPA.map || !MAPA.map.grupo) return;
+        MAPA.map.grupo.clearLayers();
+        if (!puntos.length) {
+            MAPA.map.setView([-34.5, -64], 4);
+            return;
+        }
+        var bounds = [];
+        puntos.forEach(function(p) {
+            var lat = parseFloat(p.latitud);
+            var lon = parseFloat(p.longitud);
+            if (isNaN(lat) || isNaN(lon)) return;
+            bounds.push([lat, lon]);
+            var hex = p.color_1_hex || '#888';
+            var popup = '<div style="font-size:11px;min-width:120px">';
+            if (p.tipo === 'image') {
+                popup += '<img src="api/servir_medio.php?id=' + p.id + '&thumb=1"'
+                       + ' style="max-width:180px;max-height:140px;display:block;margin-bottom:4px;border-radius:2px">';
+            }
+            if (p.descripcion) popup += '<div style="margin-bottom:3px;opacity:.9">' + p.descripcion + '</div>';
+            if (p.municipio) popup += '<div style="opacity:.55;font-size:10px">' + p.municipio
+                                   + (p.provincia ? ' · ' + p.provincia : '') + '</div>';
+            popup += '</div>';
+            L.circleMarker([lat, lon], {
+                radius: 4,
+                color: '#fff',
+                weight: 1,
+                fillColor: hex,
+                fillOpacity: 0.9
+            }).addTo(MAPA.map.grupo).bindPopup(popup, { maxWidth: 240 });
+        });
+        if (bounds.length) MAPA.map.fitBounds(bounds, { padding: [12, 12] });
+    }
+
+    // Re-filtra el mapa según la selección actual + el municipio puntual elegido.
+    function actualizarMapa() {
+        var todos = puntosFiltradosMapa();
+        var puntos = todos;
+        if (MAPA.view !== 'todos') {
+            puntos = todos.filter(function(p) { return p.municipio === MAPA.view; });
+        }
+        dibujarPuntosMapa(puntos);
+        renderSelectorMunicipios(todos);
+    }
+
+    // Selector segmentado "Todos / <municipios>" arriba del mapa.
+    function renderSelectorMunicipios(puntos) {
+        if (!MAPA.ctrl) return;
+        var munis = [];
+        var visto = {};
+        puntos.forEach(function(p) {
+            if (p.municipio && !visto[p.municipio]) {
+                visto[p.municipio] = true;
+                munis.push(p.municipio);
+            }
+        });
+        var html = '<button type="button" class="mapa-ctrl-btn' + (MAPA.view === 'todos' ? ' activo' : '') + '" data-mapa-muni="todos">Todos</button>';
+        munis.forEach(function(m) {
+            html += '<button type="button" class="mapa-ctrl-btn' + (MAPA.view === m ? ' activo' : '') + '" data-mapa-muni="' + m + '">' + m + '</button>';
+        });
+        MAPA.ctrl.innerHTML = html;
+        MAPA.ctrl.querySelectorAll('[data-mapa-muni]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                MAPA.view = this.dataset.mapaMuni;
+                actualizarMapa();
+            });
+        });
+    }
+
+    function crearMapaLeaflet(el) {
+        var map = L.map(el, { zoomControl: false, attributionControl: true }).setView([-34.5, -64], 4);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(map);
+        map.grupo = L.layerGroup().addTo(map);
+        return map;
+    }
+
+    function renderMapa(cont) {
+        // El mapa ocupa todo el cuadro; el selector por municipio va como overlay.
+        cont.innerHTML = '<div class="mapa-wrap" style="position:absolute;inset:0">'
+                       + '<div id="mapa-leaflet" style="position:absolute;inset:0"></div>'
+                       + '<div class="mapa-ctrl" style="position:absolute;top:.25rem;left:.25rem;right:.25rem;display:flex;flex-wrap:wrap;gap:.2rem;justify-content:center;pointer-events:none"></div>'
+                       + '</div>';
+        var el = cont.querySelector('#mapa-leaflet');
+        if (MAPA.map) { MAPA.map.remove(); MAPA.map = null; }
+        MAPA.map = crearMapaLeaflet(el);
+        MAPA.ctrl = cont.querySelector('.mapa-ctrl');
+        setTimeout(function() {
+            if (MAPA.map) MAPA.map.invalidateSize();
+            actualizarMapa();
+        }, 0);
     }
 
     function actualizarVentanaChat(horaActual) {
@@ -1150,35 +1316,268 @@
         var qs = Object.keys(params).map(function(k) {
             return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
         }).join('&');
-        if (qs) qs += '&';
-        qs += 'limite=30&tipo=image,video,audio,text';  // imágenes slideshow, videos, audios y textos
+        // Dos fetch en paralelo: general (imágenes, videos, audios, textos) y 360
+        var qsGeneral = qs ? qs + '&' : '';
+        qsGeneral += 'limite=30&tipo=image,video,audio,text';
+        var qs360 = qs ? qs + '&' : '';
+        qs360 += 'limite=20&tipo=video&subtipo=360';
 
-        return fetch('api/medios_filtrados.php?' + qs)
+        var fetchGeneral = fetch('api/medios_filtrados.php?' + qsGeneral)
             .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (requestId !== MEDIOS_REQUEST_ID) return;
-                MEDIOS_FILTRADOS = data;
-                // Re-renderear los bloques de medios
-                renderMediaBlocks();
-            })
             .catch(function(e) {
-                if (requestId !== MEDIOS_REQUEST_ID) return;
                 console.warn('Error cargando medios filtrados', e);
-                MEDIOS_FILTRADOS = null;
-                limpiarSeleccionAudios();
-                renderMediaBlocks();
+                return null;
             });
+        var fetch360 = fetch('api/medios_filtrados.php?' + qs360)
+            .then(function(r) { return r.json(); })
+            .catch(function(e) {
+                console.warn('Error cargando medios 360', e);
+                return null;
+            });
+
+        return Promise.all([fetchGeneral, fetch360]).then(function(resultados) {
+            if (requestId !== MEDIOS_REQUEST_ID) return;
+            MEDIOS_FILTRADOS = resultados[0];
+            MEDIOS_360 = resultados[1];
+            renderMediaBlocks();
+        });
     }
 
     function renderMediaBlocks() {
         // Re-renderear todos los bloques de medios
-        ['imagenes', 'videos', 'sonidos', 'textos', 'comunicacion'].forEach(function(id) {
+        ['imagenes', 'videos', 'videos360', 'sonidos', 'textos', 'comunicacion'].forEach(function(id) {
             var bloque = document.getElementById('bloque-' + id);
             if (!bloque) return;
             var cont = bloque.querySelector('.bloque-contenido');
             if (!cont) return;
             renderContenidoBloque(id, cont);
         });
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  VIDEOS 360° — lista + visor Three.js
+    // ═══════════════════════════════════════════════════════
+
+    function fmtDuracion(seg) {
+        if (!seg) return '';
+        var m = Math.floor(seg / 60), s = Math.floor(seg % 60);
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    function renderVideos360(cont) {
+        var items = (MEDIOS_360 && MEDIOS_360.resultados && MEDIOS_360.resultados.video)
+                    ? MEDIOS_360.resultados.video : [];
+        if (!items.length) {
+            cont.innerHTML = '<div style="opacity:.2;font-size:.6rem;text-align:center;padding:.5rem">\u2014</div>';
+            return;
+        }
+        var html = '<div style="display:flex;flex-direction:column;gap:.2rem;width:100%;padding:.1rem 0">';
+        items.forEach(function(item) {
+            var nombre = item.archivo || '';
+            var desc = item.descripcion || '';
+            if (desc.length > 30) desc = desc.slice(0, 27) + '...';
+            var dur = fmtDuracion(item.duracion_seg);
+            html += '<button type="button" class="item-360" data-id="' + item.id + '" title="' + nombre + '">'
+                  + '<span class="badge-360">360\u00b0</span>'
+                  + '<span class="item-360-text">' + (desc || nombre) + '</span>'
+                  + (dur ? '<span class="item-360-dur">' + dur + '</span>' : '')
+                  + '</button>';
+        });
+        html += '</div>';
+        cont.innerHTML = html;
+        cont.querySelectorAll('.item-360').forEach(function(btn) {
+            btn.addEventListener('click', function() { abrirVisor360(parseInt(this.dataset.id, 10)); });
+        });
+    }
+
+    // ── Visor 360° fullscreen (Three.js) ──
+    var VISOR = {
+        abierto: false,
+        raf: 0,
+        video: null,
+        renderer: null,
+        scene: null,
+        camera: null,
+        texture: null,
+        sphere: null,
+        geometry: null,
+        material: null,
+        yaw: 0,
+        pitch: 0,
+        dragging: false,
+        dragX: 0,
+        dragY: 0,
+        autoRotate: true,
+        _onResize: null,
+        _onPointerDown: null,
+        _onPointerMove: null,
+        _onPointerUp: null,
+        _onWheel: null
+    };
+
+    function abrirVisor360(id) {
+        if (typeof THREE === 'undefined') {
+            console.warn('Three.js no cargado — visor 360\u00b0 no disponible');
+            return;
+        }
+        if (VISOR.abierto) cerrarVisor360();
+
+        // Buscar el item para el título
+        var titulo = '';
+        var items = (MEDIOS_360 && MEDIOS_360.resultados && MEDIOS_360.resultados.video) || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].id === id) { titulo = items[i].archivo || items[i].descripcion || ''; break; }
+        }
+
+        // Crear overlay
+        var overlay = document.getElementById('visor-360');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'visor-360';
+            overlay.innerHTML = '<div class="visor-titulo"></div>'
+                              + '<button class="visor-close" type="button">\u2715</button>'
+                              + '<div class="visor-hint">Arrastr\u00e1 para mirar \u00b7 rueda para zoom</div>';
+            document.body.appendChild(overlay);
+        }
+        overlay.querySelector('.visor-titulo').textContent = titulo;
+        overlay.classList.add('visible');
+
+        // Cerrar
+        overlay.querySelector('.visor-close').onclick = function() { cerrarVisor360(); };
+
+        // Video element
+        var video = document.createElement('video');
+        video.loop = true;
+        video.playsInline = true;
+        video.muted = true;
+        video.autoplay = true;
+        video.preload = 'auto';
+        video.src = 'api/servir_medio.php?id=' + id;
+        video.play().catch(function() {});
+        VISOR.video = video;
+
+        // Three.js scene
+        var w = window.innerWidth, h = window.innerHeight;
+        var scene = new THREE.Scene();
+        var camera = new THREE.PerspectiveCamera(75, w / h, 0.1, 10);
+        camera.position.set(0, 0, 0);
+        camera.rotation.order = 'YXZ';
+        camera.rotation.y = VISOR.yaw;
+        camera.rotation.x = VISOR.pitch;
+
+        var texture = new THREE.VideoTexture(video);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = false;
+        VISOR.texture = texture;
+
+        var geometry = new THREE.SphereGeometry(1, 64, 32);
+        var material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide });
+        var sphere = new THREE.Mesh(geometry, material);
+        scene.add(sphere);
+
+        var renderer = new THREE.WebGLRenderer();
+        renderer.setSize(w, h);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.domElement.style.touchAction = 'none';
+        overlay.insertBefore(renderer.domElement, overlay.firstChild);
+
+        VISOR.scene = scene;
+        VISOR.camera = camera;
+        VISOR.sphere = sphere;
+        VISOR.geometry = geometry;
+        VISOR.material = material;
+        VISOR.renderer = renderer;
+        VISOR.abierto = true;
+
+        // ── Animación ──
+        function animate() {
+            VISOR.raf = requestAnimationFrame(animate);
+            if (!VISOR.abierto) return;
+            if (!VISOR.dragging && VISOR.autoRotate) VISOR.yaw += 0.0007;
+            VISOR.camera.rotation.y = VISOR.yaw;
+            VISOR.camera.rotation.x = VISOR.pitch;
+            if (VISOR.video && VISOR.video.readyState >= 2) VISOR.texture.needsUpdate = true;
+            VISOR.renderer.render(VISOR.scene, VISOR.camera);
+        }
+        animate();
+
+        // ── Drag (pointer events) ──
+        var canvas = renderer.domElement;
+        function onPointerDown(e) {
+            VISOR.dragging = true;
+            VISOR.dragX = e.clientX;
+            VISOR.dragY = e.clientY;
+            canvas.setPointerCapture(e.pointerId);
+        }
+        function onPointerMove(e) {
+            if (!VISOR.dragging) return;
+            var dx = e.clientX - VISOR.dragX;
+            var dy = e.clientY - VISOR.dragY;
+            VISOR.dragX = e.clientX;
+            VISOR.dragY = e.clientY;
+            VISOR.yaw -= dx * 0.005;
+            VISOR.pitch -= dy * 0.005;
+            if (VISOR.pitch > 1.55) VISOR.pitch = 1.55;
+            if (VISOR.pitch < -1.55) VISOR.pitch = -1.55;
+        }
+        function onPointerUp() { VISOR.dragging = false; }
+        canvas.addEventListener('pointerdown', onPointerDown);
+        canvas.addEventListener('pointermove', onPointerMove);
+        canvas.addEventListener('pointerup', onPointerUp);
+        VISOR._onPointerDown = onPointerDown;
+        VISOR._onPointerMove = onPointerMove;
+        VISOR._onPointerUp = onPointerUp;
+
+        // ── Wheel → zoom (fov) ──
+        function onWheel(e) {
+            e.preventDefault();
+            VISOR.camera.fov += e.deltaY * 0.05;
+            if (VISOR.camera.fov < 30) VISOR.camera.fov = 30;
+            if (VISOR.camera.fov > 110) VISOR.camera.fov = 110;
+            VISOR.camera.updateProjectionMatrix();
+        }
+        canvas.addEventListener('wheel', onWheel, { passive: false });
+        VISOR._onWheel = onWheel;
+
+        // ── Resize ──
+        function onResize() {
+            if (!VISOR.abierto) return;
+            var w2 = window.innerWidth, h2 = window.innerHeight;
+            VISOR.camera.aspect = w2 / h2;
+            VISOR.camera.updateProjectionMatrix();
+            VISOR.renderer.setSize(w2, h2);
+        }
+        window.addEventListener('resize', onResize);
+        VISOR._onResize = onResize;
+    }
+
+    function cerrarVisor360() {
+        if (!VISOR.abierto) return;
+        cancelAnimationFrame(VISOR.raf);
+        if (VISOR.video) {
+            VISOR.video.pause();
+            VISOR.video.src = '';
+            VISOR.video = null;
+        }
+        if (VISOR.texture) { VISOR.texture.dispose(); VISOR.texture = null; }
+        if (VISOR.geometry) { VISOR.geometry.dispose(); VISOR.geometry = null; }
+        if (VISOR.material) { VISOR.material.dispose(); VISOR.material = null; }
+        if (VISOR.renderer) {
+            VISOR.renderer.domElement.remove();
+            VISOR.renderer.dispose();
+            VISOR.renderer = null;
+        }
+        VISOR.scene = null;
+        VISOR.camera = null;
+        VISOR.sphere = null;
+        // Quitar listeners
+        if (VISOR._onResize) window.removeEventListener('resize', VISOR._onResize);
+        var overlay = document.getElementById('visor-360');
+        if (overlay) overlay.classList.remove('visible');
+        VISOR.abierto = false;
+        VISOR.yaw = 0;
+        VISOR.pitch = 0;
     }
 
     // ── MOTOR DE AUTOPLAY (sonidos) ─────────────────────────────
@@ -1318,6 +1717,8 @@
         actualizarBotonFluir();
         // Cargar medios filtrados (no bloquear el flow)
         cargarMediosFiltrados();
+        // Re-filtrar el mapa con la nueva selección
+        rerenderBloque('mapa');
         // Cargar mensajes Telegram si hay municipios seleccionados
         if (municipiosSeleccionados.length > 0) {
             cargarMensajesTelegram(municipiosSeleccionados.slice());
