@@ -31,6 +31,17 @@ Uso:
     python scripts/mapas_municipio.py --output mapas           # Regenerar todos (default)
     python scripts/mapas_municipio.py --dry-run                # Listar sin generar
     python scripts/mapas_municipio.py --db ruta.db             # BD alternativa
+    python scripts/mapas_municipio.py --no-embebido            # Sin tiles de vista inicial incrustados
+    python scripts/mapas_municipio.py --zooms 11,12,13         # Zooms a incrustar (default 11,12,13)
+
+Tiles de la vista inicial:
+    Por defecto cada HTML incrusta los tiles de la vista inicial del municipio
+    como data URIs base64 (scripts/tiles_offline.py). Al abrir el mapa en
+    TouchDesigner (Web Render TOP sobre file://) la vista inicial se muestra al
+    instante, sin descargar de internet; el zoom/desplazamiento posterior sigue
+    usando la capa base online. No requiere servidor. Los tiles se cachean en
+    `tiles_cache/` (compartido entre municipios). Flag --no-embebido para
+    deshabilitarlo.
 """
 
 import argparse
@@ -69,7 +80,6 @@ except ImportError:
 from scripts.mapa_ruta import (  # noqa: E402
     ATTR_CARTO,
     RUTA_COLOR,
-    TILE_DEFAULT,
     _crear_popup,
     _agregar_leyenda_gradiente,
     color_segun_gradiente,
@@ -77,6 +87,11 @@ from scripts.mapa_ruta import (  # noqa: E402
     formatear_pendiente,
 )
 from scripts.gradiente import haversine  # noqa: E402
+from scripts.tiles_offline import (  # noqa: E402
+    CACHE_DIR_DEFAULT,
+    ZOOMS_DEFAULT,
+    incrustar_tiles_vista_inicial,
+)
 from scripts.track_gpx import (  # noqa: E402
     cargar_tracks,
     medir_discrepancias,
@@ -238,19 +253,56 @@ def _max_gap_s(gaps_json: str | None) -> float | None:
 # ---------------------------------------------------------------------------
 
 def _crear_mapa_base(lats: list, lons: list) -> folium.Map:
-    """Crea el mapa base con centro en los puntos y bounds ajustados."""
+    """Crea el mapa base con centro en los puntos y bounds ajustados.
+
+    El mapa se crea SIN capa de tiles (tiles=None): la capa la agrega el JS
+    inyectado por `_incrustar_tiles_vista_inicial` (una sola capa que resuelve
+    los tiles embebidos como data URIs y delega a internet el resto). Así no se
+    descarga dos veces la misma zona de tiles al abrir el mapa en TD.
+    """
     centro_lat = sum(lats) / len(lats)
     centro_lon = sum(lons) / len(lons)
     bounds = [[min(lats), min(lons)], [max(lats), max(lons)]]
     m = folium.Map(
         location=[centro_lat, centro_lon],
         zoom_start=12,
-        tiles=TILE_DEFAULT,
-        attr=ATTR_CARTO,
+        tiles=None,
         control_scale=True,
     )
     m.fit_bounds(bounds)
     return m
+
+
+def _incrustar_tiles_vista_inicial(
+    mapa: folium.Map,
+    puntos: list[dict],
+    embebido: bool = True,
+    zooms: list[int] | None = None,
+    tiles_cache: str = CACHE_DIR_DEFAULT,
+) -> int:
+    """Inyecta en el mapa la capa de tiles con la vista inicial incrustada.
+
+    Una sola capa de tiles (Folium crea el mapa sin tiles): para los tiles de
+    la vista inicial devuelve data URIs base64 (se muestran al instante en TD,
+    sin red) y para el resto delega en CartoDB online. No requiere servidor y
+    no descarga dos veces la misma zona.
+
+    Returns:
+        Cantidad de tiles incrustados (0 si embebido=False o si falló la
+        descarga; la capa queda igualmente funcionando en modo online).
+    """
+    if not puntos:
+        return 0
+    lats = [p["lat"] for p in puntos]
+    lons = [p["lon"] for p in puntos]
+    if embebido:
+        return incrustar_tiles_vista_inicial(
+            mapa, lats, lons, zooms=zooms, cache_dir=tiles_cache, atribucion=ATTR_CARTO
+        )
+    # Sin embebido: inyectar igual la capa (online) para no dejar el mapa sin tiles.
+    return incrustar_tiles_vista_inicial(
+        mapa, lats, lons, zooms=[], cache_dir=tiles_cache, atribucion=ATTR_CARTO
+    )
 
 
 def _agregar_marcadores_basicos(mapa, puntos: list[dict], umbral_gap_aviso: float = 1800):
@@ -462,6 +514,9 @@ def generar_mapas(
     tolerancia_metros: int = 1000,
     mode: str = "update",
     umbral_gap_aviso: float = 1800,
+    embebido: bool = True,
+    zooms: list[int] | None = None,
+    tiles_cache: str = CACHE_DIR_DEFAULT,
 ) -> dict:
     """Genera los mapas por municipio y devuelve estadísticas.
 
@@ -474,6 +529,10 @@ def generar_mapas(
             los archivos que no existen en output_dir (los existentes se saltan).
         umbral_gap_aviso: gap del track (s) a partir del cual un medio se marca
             como "posición incierta" en su marcador/popup (default 1800).
+        embebido: si True (default), incrusta en cada HTML los tiles de la
+            vista inicial del municipio como data URIs (sin red al abrir).
+        zooms: rango de zooms a incrustar (default ZOOMS_DEFAULT: 11-13).
+        tiles_cache: carpeta de cache de tiles descargados.
 
     Returns:
         Dict con: total_municipios, total_archivos, generados, saltados, errores.
@@ -582,10 +641,13 @@ def generar_mapas(
             try:
                 generador = _GENERADORES[var]
                 mapa = generador(puntos, tramo, track_completo, umbral_gap_aviso)
+                n_tiles = _incrustar_tiles_vista_inicial(
+                    mapa, puntos, embebido=embebido, zooms=zooms, tiles_cache=tiles_cache
+                )
                 mapa.save(ruta)
                 generados += 1
-                log.info("Generado: %s (%d puntos, tramo track: %d)",
-                         nombre, len(puntos), len(tramo))
+                log.info("Generado: %s (%d puntos, tramo track: %d, %d tiles embebidos)",
+                         nombre, len(puntos), len(tramo), n_tiles)
             except Exception as e:
                 errores += 1
                 log.error("Error generando %s (%s): %s", muni, var, e)
@@ -619,6 +681,8 @@ Ejemplos:
   python scripts/mapas_municipio.py --municipio "Bell Ville"
   python scripts/mapas_municipio.py --output mapas --mode skip
   python scripts/mapas_municipio.py --output mapas --dry-run
+  python scripts/mapas_municipio.py --no-embebido
+  python scripts/mapas_municipio.py --zooms 11,12,13
         """,
     )
 
@@ -664,6 +728,21 @@ Ejemplos:
         default=1800,
         help="Gap del track (s) a partir del cual un medio se marca como posición incierta (default: 1800)",
     )
+    parser.add_argument(
+        "--no-embebido",
+        action="store_true",
+        help="No incrustar los tiles de la vista inicial (los mapas cargan todo de internet)",
+    )
+    parser.add_argument(
+        "--zooms",
+        default=None,
+        help="Zooms a incrustar, separados por coma (default: 11,12,13; se expande si el zoom inicial cae fuera)",
+    )
+    parser.add_argument(
+        "--tiles-cache",
+        default=CACHE_DIR_DEFAULT,
+        help=f"Carpeta de cache de tiles (default: {CACHE_DIR_DEFAULT})",
+    )
     args = parser.parse_args(argv)
 
     # Resolver ruta de DB
@@ -692,6 +771,18 @@ Ejemplos:
             sys.exit(1)
         variantes = pedidas
 
+    # Parsear zooms (si se pasan)
+    zooms = None
+    if args.zooms:
+        try:
+            zooms = sorted({int(z) for z in args.zooms.split(",") if z.strip()})
+        except ValueError:
+            log.error("Zooms inválidos: %s. Deben ser enteros separados por coma.", args.zooms)
+            sys.exit(1)
+        if not zooms:
+            log.error("--zooms vacío.")
+            sys.exit(1)
+
     resultado = generar_mapas(
         db_path=db_path,
         output_dir=args.output,
@@ -701,6 +792,9 @@ Ejemplos:
         tolerancia_metros=args.tolerancia_metros,
         mode=args.mode,
         umbral_gap_aviso=args.umbral_gap_aviso,
+        embebido=not args.no_embebido,
+        zooms=zooms,
+        tiles_cache=args.tiles_cache,
     )
 
     if resultado["generados"] > 0:

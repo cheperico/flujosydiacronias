@@ -82,8 +82,41 @@ NUM_THREADS_DEFAULT = 4      # hilos de CPU para onnxruntime
 VENTANA_SECS = 10            # duración de cada ventana de audio
 MAX_VENTANAS = 30            # máx ventanas procesadas (cubre 300 s de audio)
 
-# Umbral de probabilidad mínima para incluir una etiqueta en el resultado
-UMBRAL_PROB = 0.05
+# Umbral de probabilidad mínima para incluir una etiqueta en el resultado.
+# Se aplica sobre la MEDIA POR VENTANA (ver _procesar_media), escala 0-1.
+# Calibrado para este corpus (viaje terrestre BA→Tucumán 2025): habla/música
+# promedian 0.49-0.81 por ventana; el ruido de baja confianza 0.06-0.17. Ver
+# docs/plan_keywords.md §Sonido.
+UMBRAL_PROB = 0.15
+
+# ⚠️ EXCLUSIÓN ESPECÍFICA DE CORPUS (viaje terrestre Buenos Aires→Tucumán, 2025)
+# Estas clases AudioSet son FALSOS POSITIVOS para este corpus: el viento/rodadura
+# de la bici se clasifica como agua (clase 'boat, water vehicle': 51 detecciones,
+# prob media ~0.10), como erupción, explosión o serpiente (siseo de viento). El
+# viaje no incluye transporte acuático, volcanes, explosiones ni ofidios, por lo
+# que estas etiquetas son ruido y se descartan ANTES de traducir.
+# ANTES de incluir sonidos que sí puedan tener estas clases (p. ej. un cruce en
+# ferry, una grabación en un lago, contenido volcánico o pirotécnico) REVISAR/
+# ELIMINAR esta lista o usar el flag --incluir-excluidas. Es una decisión de
+# DOMINIO, no del modelo. Calibrado con la lista "a" (validación): todas las
+# dudosas resultaron falsos positivos; se excluyen las de frecuencia ≥ 3 que
+# pasarían el corte por cantidad de la nube.
+CLASES_EXCLUIDAS_POR_CORPUS: frozenset[str] = frozenset({
+    "boat, water vehicle",
+    "motorboat, speedboat",
+    "rowboat, canoe, kayak",
+    "sailboat, sailing ship",
+    "ocean",
+    "eruption",
+    "explosion",
+    "snake",
+})
+
+# Nombres del modelo vienen con mayúsculas ('Boat, Water vehicle'); se compara
+# normalizado a minúsculas.
+_CLASES_EXCLUIDAS_NORM: frozenset[str] = frozenset(
+    c.lower() for c in CLASES_EXCLUIDAS_POR_CORPUS
+)
 
 # ── Descarga del modelo (si no existe) ───────────────────────────────────────
 # El modelo CED-mini se descarga automáticamente desde GitHub Releases y se
@@ -682,20 +715,31 @@ def _clasificar_ventana(tagging, samples: list[float], rate: int) -> list[tuple[
     return [(ev.name, float(ev.prob)) for ev in eventos]
 
 
-def _procesar_media(tagging, ruta_archivo: str, top_k: int) -> list[tuple[str, float]]:
+def _procesar_media(tagging, ruta_archivo: str, top_k: int,
+                    umbral: float = UMBRAL_PROB,
+                    excluir: frozenset[str] = CLASES_EXCLUIDAS_POR_CORPUS) -> list[tuple[str, float]]:
     """
     Procesa un archivo completo: extrae audio, clasifica ventanas y agrega.
 
-    Las probabilidades por etiqueta se suman entre ventanas y se devuelve el
-    top-k global.
+    Las probabilidades por etiqueta se suman entre ventanas y se normalizan a
+    MEDIA POR VENTANA (dividido por el número de ventanas procesadas), de modo
+    que queden en escala 0-1 y sean comparables entre medios de distinta
+    duración (antes se acumulaba la suma, que inflaba las probs de los medios
+    largos y hacía inútil el umbral).
+
+    Se aplican el umbral de probabilidad (sobre la media) y la exclusión de
+    clases específicas del corpus.
 
     Args:
         tagging: instancia sherpa_onnx.AudioTagging.
         ruta_archivo: Ruta absoluta al archivo.
         top_k: cantidad de etiquetas a devolver.
+        umbral: probabilidad mínima por ventana (0-1) para incluir la etiqueta.
+        excluir: clases AudioSet a descartar por decisión de corpus.
 
     Returns:
-        Lista de (etiqueta_en, prob_agregada) ordenada por prob desc.
+        Lista de (etiqueta_en, prob_media) ordenada por prob desc, ya sin las
+        clases excluidas.
     """
     samples, rate = _extraer_audio_ffmpeg(ruta_archivo)
     ventanas = _ventanas_de_audio(samples, rate)
@@ -713,7 +757,21 @@ def _procesar_media(tagging, ruta_archivo: str, top_k: int) -> list[tuple[str, f
     if not acumulado:
         return []
 
-    ordenados = sorted(acumulado.items(), key=lambda x: -x[1])
+    n_ventanas = max(1, len(ventanas))
+    ordenados = sorted(
+        ((et, prob / n_ventanas) for et, prob in acumulado.items()),
+        key=lambda x: -x[1],
+    )
+
+    # Exclusión por corpus ANTES del umbral/traducción (clases AudioSet crudas,
+    # comparadas case-insensitive porque el modelo las devuelve con mayúsculas).
+    if excluir:
+        excluir_norm = frozenset(c.lower() for c in excluir)
+        ordenados = [(et, p) for et, p in ordenados if et.lower() not in excluir_norm]
+
+    # Umbral de confianza sobre la media por ventana
+    ordenados = [(et, p) for et, p in ordenados if p >= umbral]
+
     return ordenados[:top_k]
 
 
@@ -760,6 +818,13 @@ def main(argv: list[str] | None = None) -> None:
                         help=f"Ruta al CSV de etiquetas (default: {LABELS_DEFAULT})")
     parser.add_argument("--top-k", type=int, default=TOP_K_DEFAULT,
                         help=f"Etiquetas por media (default: {TOP_K_DEFAULT})")
+    parser.add_argument("--umbral-prob", type=float, default=UMBRAL_PROB,
+                        help=f"Probabilidad mínima por ventana (0-1) para incluir una "
+                             f"etiqueta (default: {UMBRAL_PROB}). Ver docs/plan_keywords.md §Sonido.")
+    parser.add_argument("--incluir-excluidas", action="store_true",
+                        help="NO excluir las clases específicas del corpus "
+                             "(CLASES_EXCLUIDAS_POR_CORPUS, p. ej. transporte acuático). "
+                             "Usar solo si el contenido puede tenerlas.")
     parser.add_argument("--threads", type=int, default=NUM_THREADS_DEFAULT,
                         help=f"Hilos de CPU para el modelo (default: {NUM_THREADS_DEFAULT})")
     parser.add_argument("--limit", type=int, default=None,
@@ -885,9 +950,19 @@ def _ejecutar(conn, args, rows, tagging) -> None:
             continue
 
         try:
-            top = _procesar_media(tagging, ruta, args.top_k)
+            top = _procesar_media(tagging, ruta, args.top_k,
+                                  umbral=args.umbral_prob,
+                                  excluir=None if args.incluir_excluidas
+                                  else CLASES_EXCLUIDAS_POR_CORPUS)
         except RuntimeError as e:
             log.warning("  [media %s] ⚠ %s", mid, e)
+            # Sin pista de audio: limpiar tags de sonido stale (de corridas
+            # anteriores) para no dejar dudosas obsoletas; el raw se deja como
+            # referencia.
+            conn.execute(
+                "DELETE FROM media_metadata WHERE media_id = ? AND key = ?",
+                (mid, CLAVE_SALIDA),
+            )
             sin_audio += 1
             continue
         except Exception as e:
@@ -903,8 +978,6 @@ def _ejecutar(conn, args, rows, tagging) -> None:
             for parte in (p.strip() for p in traducida.split(",") if p.strip()):
                 if _es_basura(parte):
                     continue
-                if prob < UMBRAL_PROB:
-                    continue
                 final.append((parte, prob))
 
         if not final:
@@ -914,6 +987,12 @@ def _ejecutar(conn, args, rows, tagging) -> None:
             conn.execute(
                 "INSERT OR REPLACE INTO media_metadata (media_id, key, value) VALUES (?, ?, ?)",
                 (mid, CLAVE_RAW, json.dumps(raw, ensure_ascii=False)),
+            )
+            # Limpiar tags de sonido stale de corridas anteriores (ya no hay
+            # etiquetas válidas sobre el umbral).
+            conn.execute(
+                "DELETE FROM media_metadata WHERE media_id = ? AND key = ?",
+                (mid, CLAVE_SALIDA),
             )
             continue
 

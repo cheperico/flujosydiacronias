@@ -7,6 +7,22 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 41] — 2026-08-25
+
+### Añadido
+- **Tiles de la vista inicial incrustados en los mapas por municipio** (`scripts/tiles_offline.py` + `scripts/mapas_municipio.py`): al abrir varios mapas a la vez en TouchDesigner (Web Render TOP sobre `file://`), cada uno descargaba sus tiles de CartoDB de internet en runtime → cuello de botella de red. Ahora los tiles de la **vista inicial** de cada municipio viajan incrustados como **data URIs base64** en el propio HTML: el mapa se muestra al instante sin red, y el zoom/pan posterior sigue cargando de internet.
+  - `tiles_offline.py`: `tiles_en_bounds` (Web Mercator), `zoom_fit_bounds` (replica el zoom de `fitBounds`, expande el rango si cae fuera del default 11-13), `descargar_tiles_png` (cache en `tiles_cache/`, compartido entre municipios; standalone para precargar), `data_uris`, `js_capa_base_embebida` (JS de **capa única** con polling de la variable del mapa — Folium renderiza `var map = L.map` siempre al final del script — que resuelve data URI→embedded / CartoDB online).
+  - `mapas_municipio.py`: el mapa se crea con `tiles=None` y la capa única se inyecta al guardar → **no se descarga dos veces** la misma zona (sin la capa base de Folium duplicando la descarga). Flags `--no-embebido` (deshabilita la incrustación; los mapas quedan 100% online) y `--zooms` (default 11,12,13).
+  - **Sin servidor ni procesos extra**: los data URIs son parte del HTML y funcionan en `file://` (Chromium de TD), sin CORS. No cambia el deploy ni `puente_td.py`.
+  - **Migración**: regenerados los 296 mapas (74 municipios × 4 variantes, 0 errores). Resultado: 296/296 con capa única + data URIs, **0** con capa base duplicada; total 171 MB, mediana 363 KB por mapa; 3699 tiles únicos en cache (19 MB).
+
+### Documentación
+- **AGENTS.md**: `tiles_offline.py` en estructura y catálogo; fila de `mapas_municipio.py` con la incrustación.
+- **README.md**: fila de `scripts/tiles_offline.py` + fila y árbol de `mapas_municipio.py` actualizados.
+- **`docs/retorno_fluir_td.md`**: nota en el bloque `/mapa` (HTML con vista inicial incrustada, `--no-embebido` para regenerar sin ella).
+
+---
+
 ## [Entrega 40] — 2026-08-24
 
 ### Cambiado

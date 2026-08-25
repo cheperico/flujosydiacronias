@@ -6,6 +6,7 @@ __pycache__/
 logs/
 tmp/
 mapas/
+tiles_cache/
 tracks/
 .opencode/
 opencode.json

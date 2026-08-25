@@ -12,6 +12,7 @@ Este archivo es la fuente de verdad del plan; se actualiza a medida que se refin
 | 1. Prompts gemma fusionados (P2+JSON+exactly 5) | ✅ | 162+23 regenerados, **100% exactamente 5/media** (antes 78-100% en 8) |
 | 2. Refinar v2 (bugs + auditoría SINONIMOS) | ✅ | `singularizar` protege `-és/-ás/-ís`; `_es_frase_basura` preserva lugares; SINONIMOS auditado y extendido; dry-runs idempotentes (0 cambios) |
 | 3. Sonido (mapeo EN→ES + top_k=5) | ✅ | 51 clases traducidas; 242 registros migrados; 0 tokens EN; máx 5/media |
+| 3b. **Sonido: umbral + exclusión de corpus** (2026-08-25) | ✅ | `UMBRAL_PROB` 0.05→**0.15** sobre **media por ventana** (era suma); `CLASES_EXCLUIDAS_POR_CORPUS` (transporte acuático/océano/erupción/explosión/serpiente) con exclusión case-insensitive; flags `--umbral-prob`/`--incluir-excluidas`; limpia tags stale en medios sin audio. Re-run: **barco/erupción/explosión/serpiente = 0**; solo `spray`/`flecha` (freq 1, fuera por corte) |
 | 4. Video (`ia_keywords_video`) | ✅ | 139 videos con keywords ES (traducción SINONIMOS→glosario→Argos + refinar), cap 5 |
 | 5. Nube unificada en `elecciones` | ✅ | `_consulta_tags` consume las 5 claves + filtros + top-25% + MAX_TAGS=200 |
 | 6. Descripciones (prefijos colon) | ✅ | 14 registros limpiados (7 legacy), invariante OK |
@@ -23,7 +24,7 @@ Este archivo es la fuente de verdad del plan; se actualiza a medida que se refin
 
 **Backups**: `flujos_20260823_210927_prompt_merge.db` · `flujos_20260823_213845_refinar_v2.db`
 · `flujos_20260823_215152_sonido_fix.db` · `flujos_20260823_215849_video_kw.db` ·
-`20260823_220326_limpiar_descripciones.db`.
+`20260823_220326_limpiar_descripciones.db` · `flujos_20260825_010314_sonido_umbral.db`.
 
 ## 🔜 Follow-ups (documentados, no ejecutados)
 
@@ -41,6 +42,36 @@ Este archivo es la fuente de verdad del plan; se actualiza a medida que se refin
 5. **`construcción`** quedó libre tras limpiar `urbanismo` — decidir mapeo.
 6. **Jerarquías de tags** (diferido por decisión).
 7. Video 600 tiene `keywords: ['']` en `video_analysis` (fuente vacía) → 0 tags, correcto.
+8. **Re-exportar el deploy** con la clave nueva `ia_keywords_video` y los tags de sonido
+   saneados (el snapshot `deploy/db/visualizacion.db` está desactualizado).
+
+---
+
+## §Sonido — calibración del umbral y exclusión de corpus
+
+**Umbral** (`audio_tagging.py`, `UMBRAL_PROB = 0.15`): se aplica sobre la **media por
+ventana** (0-1), no sobre la suma. Las probs almacenadas eran suma entre ventanas
+(speech llegaba a 23.9), lo que hacía inútil cualquier umbral. Normalizando a media
+por ventana: habla/música promedian 0.49-0.81; el ruido de baja confianza 0.06-0.17.
+Umbral 0.15 elimina el grueso del ruido conservando 272/314 medios.
+
+**Exclusión** (`CLASES_EXCLUIDAS_POR_CORPUS`): decisión de **dominio** (viaje terrestre
+BA→Tucumán 2025). El viento/rodadura de la bici se clasifica como agua, erupción,
+explosión o serpiente. Clases excluidas: transporte acuático (`boat, water vehicle`,
+`motorboat, speedboat`, `rowboat, canoe, kayak`, `sailboat, sailing ship`), `ocean`,
+`eruption`, `explosion`, `snake`. Comparación **case-insensitive** (el modelo las
+devuelve con mayúsculas: `'Boat, Water vehicle'`).
+
+**Cuándo revisar**: cualquier futuro contenido con agua/volcanes/pólvora/serpientes
+(p. ej. un cruce en ferry o un lago) → eliminar de la lista o usar `--incluir-excluidas`.
+
+**Validación con la lista "a"**: todas las dudosas resultaron falsos positivos. Tras
+umbral+exclusión solo quedan `spray`(1) y `flecha`(1) — frecuencia 1, fuera por el
+corte por cantidad de la nube (no requieren exclusión explícita).
+
+**Bug corregido**: `--mode update` no limpiaba el `ia_keywords_sonido` stale de medios
+sin audio (24 vídeos sin pista) → quedaban dudosas obsoletas. Ahora se borra el
+`CLAVE_SALIDA` en las ramas "sin audio" y "sin etiquetas".
 
 ---
 
