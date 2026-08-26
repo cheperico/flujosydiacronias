@@ -7,6 +7,24 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 45] — 2026-08-26
+
+### Cambiado
+- **Rediseño del render de textos en TouchDesigner** (`scripts/td/puente_td.py`, plantilla `_PLANTILLA_TEXTOS_HTML` → `td/textos_fluir.html`):
+  - **Look markdown moderno**: fondo `#000`, texto blanco, sans-serif system UI, columna de lectura `65ch` centrada, sin decoraciones (reemplaza la versión editorial serif con regla, capitular y acento ámbar).
+  - **Tipografía un 50% más grande**: `--escala: clamp(21px, min(100vw,100vh)×0.042, 69px)` (antes `14px/0.028/46px`); todo en unidades relativas → sigue adaptándose a cualquier resolución/aspecto del Web Render TOP.
+  - **Rotación fija de 30 s por texto** en ambos modos (preview y loop): antes el loop repartía `loop_secs/N` entre los textos (60 s con ~5 textos); ahora cicla cada 30 s por orden de ruta, alineado al arranque del loop vía `t0`.
+  - **Aire vertical de `18vh` arriba/abajo** dentro de la tarjeta: separa el texto de los bordes y forma parte del viaje del scroll.
+  - **Autoscroll = un único ciclo baja-subir por texto**, ocupando todo su slot (2 s arriba → baja con easing easeInOutSine → 2 s abajo → sube): antes corría a velocidad fija ~25 px/s dando varias vueltas dentro del mismo texto. Si el texto entra completo queda centrado sin scroll.
+  - **`.tarjeta` conserva `flex-shrink:0`** (crítico: sin él flex comprime la tarjeta al alto del contenedor y la medición del autoscroll nunca detecta overflow — causa real del fallo de un intento previo de rediseño).
+- **`escHtml()` robustecido** en la plantilla de textos: las entidades se construyen con `String.fromCharCode(38)` + `'amp;'/'lt;'/'gt;'` — la plantilla ya no depende de caracteres `&` literales que cualquier procesamiento pueda alterar (bug real detectado: reemplazos sin escapar en una iteración previa).
+
+### Documentación
+- **AGENTS.md**: nuevo riesgo conocido #3 — doble caché al cambiar plantillas HTML del puente (proceso Python importa módulos una sola vez + CEF del Web Render TOP cachea aunque cambie `par.url`; el `?t0=` no es confiable sobre `file://`). Actualizadas las descripciones de `web_render_textos` (catálogo de scripts y mapa de operadores TD).
+- **`docs/retorno_fluir_td.md`**: bloque "Textos HTML" reescrito (rotación fija 30 s, aire 18vh, ciclo único baja-subir, look markdown); advertencia operativa de doble caché agregada al checklist de armado; aclarado que la serif Georgia es tema propio del chat.
+
+---
+
 ## [Entrega 44] — 2026-08-25
 
 ### Añadido
@@ -15,7 +33,7 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
   - **Sin servidor ni cambios en TD**: los HTML son autocontenidos y se abren al instante en `file://`, independientes de internet/CDN.
   - `mapas_municipio.py` y `mapa_ruta.py` guardan con `guardar_autocontenido` (flag `--assets-cache`; fallback CDN si la descarga de assets falla al generar).
   - **Migración**: regenerados los 297 mapas (296 municipio + 1 ruta), 0 errores. Verificado: **0** archivos con refs CDN, fuentes inline, total 545 MB (mediana 1.6 MB).
-- **Chat de Telegram renderizado en HTML para TouchDesigner (Web Render)** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat`): además del OSC (`/mensaje` → `fluir_telegram`, intacto), en cada ráfaga con municipios el puente genera `td/chat_fluir.html` — HTML **100% autocontenido** (datos embebidos, fotos como data URIs, cero red; mismo principio que los mapas) que renderiza el chat y lo **revela sincronizado con la hora del loop**. En `/fin` el callbacks apunta el Web Render TOP `web_render_chat` a `td/chat_fluir.html?t0=<epoch_ms>&loop_secs=<N>`: la página arma su propio reloj (`t = (Date.now()-t0)/1000 % loop_secs` → hora 0..24) y muestra los mensajes conforme el loop alcanza su `hora` local (UTC−3); sin `t0` (vista previa en browser) muestra todo el thread. Flags `--generar-chat-html`/`--no-generar-chat-html`. `gui_fluir.py` no cambia (delega en `_procesar_rafaga`).
+- **Chat de Telegram renderizado en HTML para TouchDesigner (Web Render)** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat`): además del OSC (`/mensaje` → `fluir_telegram`, intacto), en cada ráfaga con municipios el puente genera `td/chat_fluir.html` — HTML **100% autocontenido** (datos embebidos, fotos como data URIs, cero red; mismo principio que los mapas) que renderiza el chat y lo **revela sincronizado con la hora del loop**. En `/fin` el callbacks apunta el Web Render TOP `web_render_chat` a `td/chat_fluir.html?t0=<epoch_ms>&loop_secs=<N>`: la página arma su propio reloj (`t = (Date.now()-t0)/1000 % loop_secs` → hora 0..24) y muestra los mensajes conforme el loop alcanza su `hora` local (UTC−3). Los mensajes arrancan `display:none` y se revelan con fadeIn cuando el loop alcanza su hora → el feed crece y el contenedor **baja automáticamente** (auto-scroll de chat en vivo); sin `t0` (vista previa) simula el tiempo (~45 s) para ver el auto-scroll también en browser. **Nuevo diseño estilo Telegram Web**: burbujas con fondo gris claro, avatar con iniciales del remitente, fotos dentro de la burbuja (grid), separadores tipo Telegram, auto-scroll suave. **Scroll corregido**: se quitó `scroll-behavior:smooth` (el re-set de `scrollTop` cada 250ms deslizaba el thread entero en segundos); ahora es snap instantáneo que baja solo cuando se revela un mensaje nuevo (`huboNuevo`) → el feed avanza al ritmo del loop sin glides rápidos. **Rediseño v2 (tema oscuro editorial)**: fondo negro + Georgia serif coherente con `textos_fluir.html`; burbujas con **zig-zag por turno** (alternan de lado cuando cambia el escribiente) y nombre/acento lateral en color determinista por persona (paleta de 8 tonos estilo Telegram); respiro visual en cada cambio de emisor; el chat **se reinicia** cuando el loop da la vuelta. Flags `--generar-chat-html`/`--no-generar-chat-html`. `gui_fluir.py` no cambia (delega en `_procesar_rafaga`).
 - **Textos renderizados en HTML para TouchDesigner (Web Render)** (`scripts/td/puente_td.py` + `td/fluir_callbacks.dat`): mismo patrón que el chat — `puente_td.py --generar-textos-html` (default) genera `td/textos_fluir.html` (HTML **100% autocontenido**, `titulo` + `texto_completo` por texto, ordenados por ruta vía `keypoint`) y en `/fin` el callbacks apunta el Web Render TOP `web_render_textos` a `td/textos_fluir.html?t0=<epoch_ms>&loop_secs=<N>`. La página muestra **UN texto a la vez**, rotando en orden de ruta a medida que avanza el loop (slots de igual duración); sin `?t0` (vista previa) rota cada 6 s. Canal OSC `/texto` → `fluir_textos` intacto como respaldo/estado. Flag `--generar-textos-html`/`--no-generar-textos-html`.
 
 ### Documentación

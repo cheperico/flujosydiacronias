@@ -362,3 +362,72 @@ Implicancias del diseño:
 > (depende de cómo arme TD `osc_in2`). El formato del "Fluir" de entrada (ráfaga
 > actual) se acepta tal cual; el "mensaje grande único" queda descartado por
 > innecesario con el debounce. Ver ROADMAP (Etapa 5, "Fluir").
+
+### 3. Liberación de los botones al presionar "Fluir" (2026-08-26)
+
+**Pregunta**: ¿cómo vuelven a deseleccionarse los botones después de enviar la
+ráfaga? No hay magia: los Button COMP en modo `toggledown` **no se sueltan
+solos** — alguien tiene que apagarlos explícitamente. El reset vive en el
+`panelexec1` del botón **"Fluir"** (Panel Execute DAT, `onValueChange`), que al
+presionarse (`panelValue == 1`) hace **tres cosas en orden**:
+
+1. **Descarga la ráfaga**: recorre la tabla acumulada `/project2/elecciones`
+   (columna 0 = valor, columna 1 = address OSC) y envía cada fila por
+   `osc_out1` (9001 → Python): `sendOSC(ruta, [val])`.
+2. **Limpia la tabla**: `tabla.clear()` — los datos acumulados se van.
+3. **Libera los botones**: busca todos los containers `elec_*` bajo
+   `/project2` y apaga cada botón interno seteando `boton.panel.state = 0`.
+
+Código real del `panelexec1` del botón "Fluir":
+
+```python
+def onValueChange(panelValue):
+	parent().par.value0 = panelValue
+
+	# Ejecutar ÚNICAMENTE cuando el botón se presiona (1), ignorando cuando se suelta (0)
+	if panelValue == 1:
+		tabla = op('/project2/elecciones')
+		osc_out = op('/project2/osc_out1')
+
+		if tabla.numRows > 0:
+			for row in range(tabla.numRows):
+				# Evitar leer filas vacías o incompletas
+				if tabla.numCols >= 2 and tabla[row, 1] is not None:
+					val = tabla[row, 0].val
+					ruta = tabla[row, 1].val.strip()
+
+					if ruta:
+						if not ruta.startswith('/'):
+							ruta = '/' + ruta
+						osc_out.sendOSC(ruta, [val])
+
+			# Limpiar los datos
+			tabla.clear()
+
+			project2 = op('/project2')
+			if project2:
+				# Busca todos los contenedores que empiecen con 'elec_' dentro de /project2/
+				contenedores = project2.findChildren(name='elec_*', type=containerCOMP)
+
+				for cont in contenedores:
+					# Dentro de cada contenedor, busca y apaga todos los botones
+					for boton in cont.findChildren(type=buttonCOMP):
+						boton.panel.state = 0
+```
+
+**Detalles clave** (para replicar el patrón en un panel nuevo):
+- Se apaga con **`boton.panel.state = 0`**, no con `boton.par.value0 = 0`.
+  Para un Button COMP ambos llegan al mismo estado, pero `.panel.state` es el
+  canal canónico del Panel Execute.
+- **No hace falta bypass del `panelexec1`** de cada botón: el `onValueChange`
+  de cada botón (igual que el del "Fluir") solo actúa cuando `panelValue == 1`
+  e **ignora el evento off (0)**. Por eso apagar a `state = 0` no emite OSC
+  espurio de deselección que se mezcle con la ráfaga.
+- La iteración `project2.findChildren(name='elec_*', type=containerCOMP)`
+  encuentra los containers de cada grupo (`elec_<id>_container<N>`), y
+  `cont.findChildren(type=buttonCOMP)` barre los botones clonados del
+  Replicator. La semilla `boton_<id>_0` vive en la raíz de `/project2` (no
+  dentro de los containers), así que no se toca.
+- El reseteo es **local a TD**: Python nunca pide que se liberen los botones.
+  La fuente de verdad del estado visual es el propio panel; la ráfaga se
+  re-emite tal cual en cada click de "Fluir".

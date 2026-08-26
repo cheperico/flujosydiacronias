@@ -840,9 +840,15 @@ parsear código dentro de los operadores de renderizado.
 > (`type='text'`, `titulo` + `texto_completo`, ordenados por ruta vía `keypoint`) y en
 > cada `/fin` el callbacks apunta el Web Render TOP `web_render_textos` a
 > `td/textos_fluir.html?t0=<epoch_ms>&loop_secs=<N>`. La página muestra **UN texto a la
-> vez**, rotando a medida que avanza el loop (slots de igual duración en orden de ruta);
-> sin `?t0` (vista previa) rota cada 6 s. Canal OSC `/texto` → `fluir_textos` intacto
-> como respaldo/estado.
+> vez** con **rotación fija de 30 s por texto** en orden de ruta (alineada al arranque del
+> loop vía `t0`; independiente de `loop_secs`). Look markdown: fondo `#000`, texto blanco,
+> sans-serif system UI, columna de lectura `65ch` centrada, tipografía fluida
+> `clamp(21px … 69px)` sobre `min(100vw, 100vh)` (se adapta a cualquier resolución). Aire
+> vertical de `18vh` arriba/abajo dentro de la tarjeta: si el texto no entra en pantalla
+> hace **un único ciclo baja-subir ocupando sus 30 s** (pausas de 2 s en los bordes,
+> easing easeInOutSine), incluyendo ese aire; si entra, queda centrado sin scroll. Sin
+> `?t0` (vista previa) misma rotación de 30 s anclada a la carga de página. Canal OSC
+> `/texto` → `fluir_textos` intacto como respaldo/estado.
 >
 > **Chat HTML (Web Render)**: además del canal OSC (`/mensaje` → `fluir_telegram`, intacto
 > como respaldo/estado), el puente genera `td/chat_fluir.html` — HTML **autocontenido**
@@ -850,7 +856,16 @@ parsear código dentro de los operadores de renderizado.
 > revela **sincronizado con la hora del loop**. En cada `/fin` el callbacks apunta el Web
 > Render TOP `web_render_chat` a `td/chat_fluir.html?t0=<epoch_ms>&loop_secs=<N>`: la página
 > arma su propio reloj (`t = (Date.now()-t0)/1000 % loop_secs` → hora 0..24) y muestra los
-> mensajes conforme el loop alcanza su `hora` local (UTC−3). Las fotos viajan como data URIs
+> mensajes conforme el loop alcanza su `hora` local (UTC−3). Los mensajes arrancan
+> `display:none` y se revelan con fadeIn cuando el loop alcanza su hora → el feed crece y el
+> contenedor **baja solo** (auto-scroll de chat en vivo, **snap instantáneo sin
+> `scroll-behavior:smooth`**: baja únicamente cuando se revela un mensaje, siguiendo el ritmo
+> del loop sin deslizamientos rápidos). Cuando el loop da la vuelta, el chat **se reinicia**
+> (oculta todos los mensajes y vuelve arriba). Tema oscuro editorial —fondo negro + Georgia
+> serif, propio del chat; los textos hoy van en sans-serif markdown— y burbujas con **zig-zag por turno**: alternan
+> de lado cuando cambia el escribiente, con nombre y acento lateral en el color determinista
+> de cada persona (paleta de 8 tonos). Sin `?t0` (vista previa) simula el
+> tiempo (~45 s) para ver el auto-scroll también en browser. Las fotos viajan como data URIs
 > (thumbnails embebidos); sin servidor ni fetch.
 
 **Por qué**: 4 de las 5 tablas por tipo comparten estructura (`[media_id,
@@ -987,7 +1002,13 @@ de pipeline visual, pero los nombres y tablas quedan disponibles.
 - [ ] **`web_render_textos`** — Web Render TOP en `/project2`, URL inicial
       `file:///.../td/textos_fluir.html` (ruta absoluta); el callbacks lo recarga en
       cada `/fin` con `?t0=<epoch_ms>&loop_secs=<N>` (el HTML lo genera `puente_td.py`
-      durante la ráfaga; los textos se revelan sincronizados con el loop, cero red).
+      durante la ráfaga; rotación fija de 30 s por texto con ciclo baja-subir si no
+      entra, cero red).
+- [ ] ⚠️ **Al cambiar plantillas HTML de `puente_td.py`** (`textos_fluir.html`,
+      `chat_fluir.html`): reiniciar el proceso del puente Y recargar estos Web Render
+      TOP — hay doble caché (módulos Python importados una sola vez + caché CEF del
+      operador, donde el `?t0=` NO es confiable sobre `file://`). Checklist completo en
+      riesgos de `AGENTS.md`.
 - [ ] (Opcional, etapa visual) **`fluir_loop`** Timeline CHOP; **`fluir_movie`**
       Movie File In TOP; **`fluir_engine`** Script DAT con el planificador (scheduler).
 - [ ] Verificación de punta a punta (3 terminales):

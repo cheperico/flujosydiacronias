@@ -212,3 +212,57 @@ ubicacion: -31.134717004115664, -64.14005467054041
 
 Las postas consistían ordinariamente en uno o más ranchos con corral, pozo (donde había agua subterránea) y otras dependencias, todo generalmente cercado por un gran foso con puente levadizo para estar a cubierto de las invasiones de los indios cuando se trataba de parajes despoblados (...) El tiempo mínimo que se empleaba en estos viajes era (...) seis días de Córdoba a Santiago, uno y medio de Santiago a Tucumán.
 Eduardo y Gabriel Carrasco, Las primeras mensajerías (1854)
+
+## Saliendo de Córdoba hacia Jesús María
+autor: Concolorcorvo
+fecha:
+tags:
+ubicacion: -30.98703356804225, -64.10477407761408
+
+Las carretas, regularmente, cuando salen de esta ciudad siguiendo el viaje que llevo, no pasan de la otra banda del río, adonde harán prevención de agua los señores caminantes para dos días, no haciendo mucha confianza de la botija que va en cada carreta, porque en el camino sólo se encuentra un pozo, en tiempo de avenidas, que enturbia mucho el ganado y no se halla agua en trece leguas de monte muy espeso y ardiente, hasta que se encuentra la estancia llamada Caroya (COLONIA CAROYA), perteneciente al colegio de Monserrat de Córdoba, y entre ésta y Sinsacate está la Hacienda del Rey, nombrada Jesús María, que administra don Juan Jacinto de Figueroa.
+Concolorcorvo, El lazarillo de ciegos caminantes (1771)
+
+## De Jesús María a San José de la Dormida
+autor: Concolorcorvo
+fecha:
+tags:
+ubicacion: -30.3563496278419, -63.95060982116588
+
+De Sinsacate iban los correos antes por San Antonio y San Pedro, pero persuadieron al visitador a que era mejor camino por La Dormida, porque en aquellos sitios sólo había maestres de campo, sargentos mayores y capitanes, con cuyo pretexto se podían excusar a la maestría de postas (...) por lo que se resolvió seguir el camino de La Dormida que dista dieciséis leguas de Sinsacate, y aunque hay antes varios colonos en el Totoral y en Simbolar, con agua perenne, son gente de poca consideración, y la mayor parte gauderíos (GAUCHOS), de quienes no se pueden fiar las postas.
+Concolorcorvo, El lazarillo de ciegos caminantes (1771)
+
+## Villa de María
+autor: Atahualpa Yupanqui
+fecha:
+tags:
+ubicacion: -30.355460865303915, -63.94854988474513
+
+Cuando uno llega a la antesala de un desierto parece que el camino estuviera diciendo: “Hasta acá, Córdoba; más allá, Tucumán”. Y uno ve que el pasto empieza a no ser tan verde y se vuelve más bien gris, y los hombres son afectivos con quienes pasan pero no tienen nada que ofrecer más que su cordialidad, su cariño y su ademán de hermandad. Eso es hermoso, por ahí distinto al hombre de la llanura donde la tierra es gorda y rica, entonces hay de todo, hasta un buen asado.
+Atahualpa Yupanqui, Este largo camino. Memorias (texto de fines de los 70 publicado en 2008)
+
+## Ingresando a la provincia de Santiago del Estero
+autor: Concolorcorvo
+fecha:
+tags:
+ubicacion: -29.65856263079604, -63.72094985504967
+
+Luego que se sale de la posta nombrada El Cachi da principio la jurisdicción de Santiago del Estero, territorio expuesto a inundaciones y el menos poblado de todo el Tucumán (...) En tiempos de avenidas hay muchos bañados que impiden la aceleración del viaje, y por el camino de las carretas suelen formarse unos sequiones y algunos atolladeros que cortan la marcha, siendo preciso aderezarlos con algunos troncos y espesas ramas. Por este camino se rodean de siete a ocho leguas, pero no faltan ranchos que proveen de corderos, gallinas, pollos, huevos, calabazas, sandías y otras menudencias, al mismo precio que en la jurisdicción de Córdoba.
+Concolorcorvo, El lazarillo de ciegos caminantes (1771)
+
+## Santiago del Estero
+autor: Aimé Tschiffely
+fecha:
+tags:
+ubicacion: -29.569145046012267, -63.71153115892794
+
+La tierra hacíase cada vez más árida, los únicos animales que parecen subsistir en algunas zonas de este semi desierto son las cabras. Las pocas habitaciones que se encuentran están bastante alejadas entre sí y esto se aplica a las personas que viven en ellas. Mis bravos caballos manteníanse como héroes a pesar de no haber comido casi en varios días y de la falta de agua.
+Aimé Tschiffely, Mancha y Gato cuentan sus aventuras (publicado en 1945 el libro narra el viaje de Tschiffely y los caballos Gato y Mancha, que salieron de Buenos Aires en 1925 y llegaron a Nueva York tres años después)
+
+## Villa Ojo de Agua
+autor: Ernesto "Che" Guevara
+fecha: 
+tags:
+ubicacion: -29.501575860326636, -63.695630190309565
+
+La tierra hacíase cada vez más árida, los únicos animales que parecen subsistir en algunas zonas de este semi desierto son las cabras. Las pocas habitaciones que se encuentran están bastante alejadas entre sí y esto se aplica a las personas que viven en ellas. Mis bravos caballos manteníanse como héroes a pesar de no haber comido casi en varios días y de la falta de agua.
+Ernesto "Che" Guevara, “Diario de un viaje en bicimoto por las provincias argentinas” (el texto, escrito en 1950, fue publicado por Ernesto Guevara Lynch en el libro Mi hijo el Che)

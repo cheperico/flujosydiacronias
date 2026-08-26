@@ -462,6 +462,14 @@ def _generar_html_chat(
 
 # Plantilla del HTML autocontenido del chat. El placeholder <JSON_EMBEDDED> se
 # reemplaza por el JSON serializado de los mensajes (con escapes de </script>).
+# Tema oscuro editorial: fondo negro + Georgia serif (coherente con
+# td/textos_fluir.html), burbujas oscuras estilo Telegram night. Zig-zag por
+# turno: las burbujas alternan de lado cuando cambia el escribiente, con nombre
+# y acento lateral en el color determinista de cada persona. Se revelan
+# display:none -> display:flex cuando la hora del loop alcanza su `hora` (snap
+# instantáneo, solo cuando se revela un mensaje nuevo); cuando el loop da la
+# vuelta, el chat se reinicia (oculta todo y vuelve arriba).
+# Sin ?t0 (preview) simula el tiempo (~45 s) para que el auto-scroll se vea.
 _PLANTILLA_CHAT_HTML = r"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -470,18 +478,91 @@ _PLANTILLA_CHAT_HTML = r"""<!DOCTYPE html>
 <title>Flujos · Chat Telegram (TD)</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  html, body { width:100%; height:100%; overflow:hidden; font-family:system-ui,'Segoe UI',sans-serif; background:transparent; }
-  :root { --tr:200; --tg:200; --tb:200; --ar:255; --ag:200; --ab:100; }
-  #chat { display:flex; flex-direction:column; gap:.1rem; width:100%; height:100%; min-height:0; overflow-y:auto; padding:.2rem .3rem; color:rgb(var(--tr),var(--tg),var(--tb)); scrollbar-width:none; }
-  #chat::-webkit-scrollbar { display:none; }
-  .lugar { margin:.25rem 0 .1rem; font-size:.48rem; letter-spacing:.08em; text-transform:uppercase; opacity:.5; color:rgb(var(--ar),var(--ag),var(--ab)); border-top:1px solid rgba(var(--tr),var(--tg),var(--tb),.12); padding-top:.15rem; font-weight:500; flex-shrink:0; }
-  .msg { font-size:.5rem; line-height:1.3; border-bottom:1px solid rgba(var(--tr),var(--tg),var(--tb),.08); padding:.1rem 0; opacity:0; transition:opacity .6s ease; flex-shrink:0; }
-  .msg.visible { opacity:1; }
-  .msg .hora { opacity:.5; font-size:.45rem; }
-  .msg .nombre { opacity:.85; font-weight:600; }
-  .msg .texto { opacity:.65; white-space:pre-wrap; }
-  .fotos { display:flex; gap:.15rem; margin-top:.1rem; flex-wrap:wrap; }
-  .fotos img { width:auto; height:2.8rem; max-width:5rem; object-fit:cover; border-radius:2px; border:1px solid rgba(var(--tr),var(--tg),var(--tb),.12); }
+  html, body { width:100%; height:100%; overflow:hidden; font-family:Georgia,'Times New Roman',serif; background:#000; }
+  :root {
+    --tr:200; --tg:200; --tb:200;
+    --ar:255; --ag:200; --ab:100;
+    --bg-bubble: rgba(255,255,255,.07);
+    --bubble-shadow: none;
+  }
+  #chat {
+    display:flex; flex-direction:column; gap:.2rem;
+    width:100%; height:100%; min-height:0;
+    overflow-y:auto; padding:.4rem .4rem .8rem;
+    color:rgb(var(--tr),var(--tg),var(--tb));
+    scrollbar-width:thin; scrollbar-color: rgba(var(--tr),var(--tg),var(--tb),.2) transparent;
+  }
+  #chat::-webkit-scrollbar { width:6px; }
+  #chat::-webkit-scrollbar-track { background:transparent; }
+  #chat::-webkit-scrollbar-thumb { background:rgba(var(--tr),var(--tg),var(--tb),.2); border-radius:3px; }
+
+  .date-separator {
+    display:flex; align-items:center; text-align:center;
+    margin:.6rem 0 .3rem; color:rgba(var(--tr),var(--tg),var(--tb),.5);
+    font-size:.87rem; font-weight:500; letter-spacing:.05em;
+  }
+  .date-separator::before,
+  .date-separator::after {
+    content:""; flex:1; height:1px;
+    background:rgba(var(--tr),var(--tg),var(--tb),.12);
+  }
+  .date-separator span { padding:0 .5rem; white-space:nowrap; }
+  .date-separator.municipio {
+    color:rgb(var(--ar),var(--ag),var(--ab));
+    font-weight:600; text-transform:uppercase; letter-spacing:.05em;
+  }
+  .date-separator.municipio::before,
+  .date-separator.municipio::after {
+    background:rgba(var(--ar),var(--ag),var(--ab),.2);
+  }
+
+  .msg {
+    display:none;
+    width:100%; max-width:78%;
+    align-self:flex-start;
+    animation:fadeIn .4s ease-out;
+  }
+  .msg.der { align-self:flex-end; }
+  .msg.cambio { margin-top:.45rem; }
+  .msg.visible { display:flex; }
+
+  @keyframes fadeIn {
+    from { opacity:0; transform:translateY(6px); }
+    to { opacity:1; transform:translateY(0); }
+  }
+
+  .msg-bubble {
+    display:flex; flex-direction:column;
+    background:var(--bg-bubble);
+    border-radius:18px 18px 18px 4px;
+    box-shadow:var(--bubble-shadow);
+    padding:.4rem .6rem .35rem;
+    max-width:100%;
+  }
+  .msg.der .msg-bubble { border-radius:18px 18px 4px 18px; }
+
+  .msg-header {
+    display:flex; align-items:center; gap:.35rem;
+    margin-bottom:.15rem; min-height:1.2rem;
+  }
+  .msg-meta { display:flex; flex-direction:column; gap:.05rem; }
+  .msg-name { font-size:.9rem; font-weight:600; color:rgb(var(--tr),var(--tg),var(--tb)); line-height:1.1; }
+  .msg-time { font-size:.72rem; color:rgba(var(--tr),var(--tg),var(--tb),.5); line-height:1; }
+
+  .msg-text { font-size:.9rem; line-height:1.5; color:rgb(var(--tr),var(--tg),var(--tb)); white-space:pre-wrap; word-wrap:break-word; }
+
+  .msg-media { display:grid; grid-template-columns:repeat(2,1fr); gap:.25rem; margin-top:.3rem; }
+  .msg-media img {
+    width:100%; aspect-ratio:1; object-fit:cover;
+    border-radius:8px; background:rgba(255,255,255,.04);
+  }
+  .msg-media.single { grid-template-columns:1fr; }
+  .msg-media.two { grid-template-columns:1fr 1fr; }
+  .msg-media.three { grid-template-columns:1fr 1fr; }
+  .msg-media.three img:first-child { grid-column:span 2; }
+  .msg-media.four { grid-template-columns:1fr 1fr; }
+
+  .msg-type { font-size:.75rem; opacity:.6; margin-right:.2rem; }
 </style>
 </head>
 <body>
@@ -490,10 +571,10 @@ _PLANTILLA_CHAT_HTML = r"""<!DOCTYPE html>
 var MENSAJES = <JSON_EMBEDDED>;
 (function(){
   function iconoTipo(t){
-    if (t === 'photo') return '\uD83D\uDCF7 ';
-    if (t === 'video') return '\uD83C\uDFAC ';
-    if (t === 'voice') return '\uD83C\uDFA4 ';
-    return '\uD83D\uDCCE ';
+    if (t === 'photo') return '\uD83D\uDCF7';
+    if (t === 'video') return '\uD83C\uDFAC';
+    if (t === 'voice') return '\uD83C\uDFA4';
+    return '\uD83D\uDCCE';
   }
   function hhmm(h){
     if (h == null || isNaN(h)) return '';
@@ -507,56 +588,122 @@ var MENSAJES = <JSON_EMBEDDED>;
   var t0 = parseFloat(params.get('t0'));
   var loopSecs = parseFloat(params.get('loop_secs'));
   var conReloj = isFinite(t0) && isFinite(loopSecs) && loopSecs > 0;
+  var tCarga = Date.now();
   function horaActual(){
-    if (!conReloj) return 24;
+    if (!conReloj) {
+      return Math.min(24, ((Date.now() - tCarga) / 1000) * (24 / 45));
+    }
     var t = ((Date.now() - t0) / 1000) % loopSecs;
     return (t / loopSecs) * 24;
   }
   var cont = document.getElementById('chat');
   var NODOS = [];
   var orden = [];
+  // Color por persona: paleta fija de 8 tonos (estilo Telegram), asignación
+  // determinista por hash del from_name. El mismo emisor tiene siempre el
+  // mismo color dentro del thread.
+  var PALETA = ['#E17076','#FAA774','#A695E7','#7BC862','#6EC9CB','#65AADD','#EE7AAE','#E5CA77'];
+  function colorPersona(nombre){
+    var h = 0;
+    var s = nombre || '';
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return PALETA[h % PALETA.length];
+  }
+  // Zig-zag por turno: el lado alterna solo cuando cambia el escribiente;
+  // mensajes consecutivos del mismo emisor quedan del mismo lado.
+  var emisorAnterior = null;
+  var ladoDerecha = false;
   MENSAJES.forEach(function(m){
     if (orden.indexOf(m.municipio) === -1) orden.push(m.municipio);
   });
   orden.forEach(function(lugar){
     var sep = document.createElement('div');
-    sep.className = 'lugar';
-    sep.textContent = lugar || '—';
+    sep.className = 'date-separator' + (lugar && lugar !== '—' ? ' municipio' : '');
+    var span = document.createElement('span');
+    span.textContent = lugar || '—';
+    sep.appendChild(span);
     cont.appendChild(sep);
     MENSAJES.forEach(function(m){
       if (m.municipio !== lugar) return;
       var div = document.createElement('div');
       div.className = 'msg';
+      // Cambio de escribiente: alternar lado + respiro visual.
+      if (m.from_name !== emisorAnterior) {
+        ladoDerecha = !ladoDerecha;
+        emisorAnterior = m.from_name;
+        div.classList.add('cambio');
+      }
+      if (ladoDerecha) div.classList.add('der');
+      var color = colorPersona(m.from_name || '');
+      var bubble = document.createElement('div');
+      bubble.className = 'msg-bubble';
+
+      var header = document.createElement('div');
+      header.className = 'msg-header';
+
+      var meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      var name = document.createElement('span'); name.className = 'msg-name';
+      name.style.color = color;
+      name.textContent = m.from_name || 'Desconocido';
+      meta.appendChild(name);
+      var time = document.createElement('span'); time.className = 'msg-time';
+      time.textContent = hhmm(m.hora) + ' · ' + (m.fecha || '');
+      meta.appendChild(time);
+      header.appendChild(meta);
+      bubble.appendChild(header);
+
       var linea = document.createElement('div');
-      linea.appendChild(document.createTextNode(hhmm(m.hora) + ' '));
-      var horaEl = document.createElement('span'); horaEl.className = 'hora';
-      horaEl.textContent = (m.fecha || '') + ' ';
-      linea.appendChild(horaEl);
-      var nom = document.createElement('span'); nom.className = 'nombre';
-      nom.textContent = (m.from_name || 'Desconocido') + ' ';
-      linea.appendChild(nom);
-      var txt = document.createElement('span'); txt.className = 'texto';
-      txt.textContent = iconoTipo(m.tipo) + (m.texto || '');
-      linea.appendChild(txt);
-      div.appendChild(linea);
+      linea.className = 'msg-text';
+      var tipoIcon = document.createElement('span'); tipoIcon.className = 'msg-type';
+      tipoIcon.textContent = iconoTipo(m.tipo) + ' ';
+      linea.appendChild(tipoIcon);
+      linea.appendChild(document.createTextNode(m.texto || ''));
+      bubble.appendChild(linea);
+
       if (m.fotos && m.fotos.length) {
-        var fot = document.createElement('div'); fot.className = 'fotos';
+        var media = document.createElement('div');
+        var cnt = m.fotos.length;
+        media.className = 'msg-media' + (cnt === 1 ? ' single' : cnt === 2 ? ' two' : cnt === 3 ? ' three' : ' four');
         m.fotos.forEach(function(src){
           var im = document.createElement('img'); im.src = src; im.loading = 'lazy';
-          fot.appendChild(im);
+          media.appendChild(im);
         });
-        div.appendChild(fot);
+        bubble.appendChild(media);
       }
+
+            div.appendChild(bubble);
+      // Acento lateral en el color de la persona (lado exterior de la burbuja).
+      bubble.style[ladoDerecha ? 'borderRight' : 'borderLeft'] = '3px solid ' + color;
       cont.appendChild(div);
       NODOS.push(div);
     });
   });
+  var haPrev = -1;
   setInterval(function(){
     var ha = horaActual();
-    for (var i = 0; i < MENSAJES.length && i < NODOS.length; i++) {
-      if (ha >= MENSAJES[i].hora) NODOS[i].classList.add('visible');
+    // Si la hora del loop retrocede, el rulo volvió a arrancar: reiniciar el
+    // chat (ocultar todos los mensajes y volver el viewport arriba).
+    if (haPrev >= 0 && ha < haPrev - 0.5) {
+      for (var r = 0; r < NODOS.length; r++) NODOS[r].classList.remove('visible');
+      cont.scrollTop = 0;
+      haPrev = ha;
+      return;
     }
-    cont.scrollTop = cont.scrollHeight;
+    haPrev = ha;
+    var huboNuevo = false;
+    for (var i = 0; i < MENSAJES.length && i < NODOS.length; i++) {
+      if (ha >= MENSAJES[i].hora && !NODOS[i].classList.contains('visible')) {
+        NODOS[i].classList.add('visible');
+        huboNuevo = true;
+      }
+    }
+    // Bajar solo cuando se reveló un mensaje nuevo: el viewport sigue el feed
+    // al ritmo del loop (sin scroll-behavior smooth, snap instantáneo).
+    if (huboNuevo) {
+      var chat = document.getElementById('chat');
+      chat.scrollTop = chat.scrollHeight;
+    }
   }, 250);
 })();
 </script>
@@ -573,9 +720,9 @@ def _generar_html_textos(
 
     Web Render TOP `web_render_textos` (file://, cero red). Embebe los textos
     como JSON inline + el reloj del loop (?t0=&loop_secs=). Muestra UN texto a
-    la vez, rotando con el reloj del loop en orden de ruta (keypoint = t_loop).
-    Sin parámetros (preview en browser) rota cada 6 s para mostrar el
-    comportamiento.
+    la vez: cada texto dura 30 s (rotación fija por orden de ruta, alineada al
+    arranque del loop vía t0). Si un texto no entra en pantalla, hace UN ciclo
+    baja-subir ocupando esos 30 s, incluyendo el aire vertical.
 
     Args:
         textos: lista de dicts del spec (por_tipo["text"]). Cada item tiene
@@ -623,10 +770,16 @@ def _generar_html_textos(
 
 
 # Plantilla del HTML autocontenido de los textos (crónicas, type='text').
-# El placeholder <JSON_EMBEDDED> se reemplaza por el JSON serializado de los
-# textos (con escapes de </script>). Muestra UN texto a la vez, rotando con el
-# reloj del loop (?t0=&loop_secs=) en orden de ruta (keypoint); sin reloj
-# (preview) rota cada 6 s.
+# Look markdown moderno: fondo negro #000, texto blanco, sans-serif system UI,
+# columna de lectura 65ch centrada, sin decoraciones. Responsivo: tipografía
+# fluida (--escala clamp sobre min(vw,vh)) y todo en unidades relativas.
+# ⚠️ .tarjeta REQUIERE flex-shrink:0 — sin él, flex comprime la tarjeta al alto
+# del contenedor y la medición del autoscroll nunca detecta overflow.
+# Mecánica: rebuild por rotación (30 s fijos por texto, ambos modos),
+# auto-scroll de UN ciclo baja-subir por slot (anclado a esos 30 s, incluye
+# el aire del padding vertical), handler de resize. El placeholder
+# <JSON_EMBEDDED> se reemplaza por el JSON serializado de los textos
+# (con escapes de </script>).
 _PLANTILLA_TEXTOS_HTML = r"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -635,16 +788,53 @@ _PLANTILLA_TEXTOS_HTML = r"""<!DOCTYPE html>
 <title>Flujos · Textos (TD)</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  html, body { width:100%; height:100%; overflow:hidden; font-family:system-ui,'Segoe UI',sans-serif; background:transparent; }
-  :root { --tr:200; --tg:200; --tb:200; --ar:255; --ag:200; --ab:100; }
-  #textos { display:flex; flex-direction:column; justify-content:center; gap:.35rem; width:100%; height:100%; min-height:0; overflow-y:auto; padding:.4rem .5rem; color:rgb(var(--tr),var(--tg),var(--tb)); scrollbar-width:none; }
-  #textos::-webkit-scrollbar { display:none; }
-  .texto-card { font-size:.6rem; line-height:1.5; padding:.4rem 0; opacity:0; transition:opacity .7s ease; }
-  .texto-card.visible { opacity:1; }
-  .texto-card .titulo { font-weight:600; letter-spacing:.06em; color:rgb(var(--ar),var(--ag),var(--ab)); margin-bottom:.2rem; }
-  .texto-card .hora { opacity:.5; font-size:.48rem; margin-right:.3rem; }
-  .texto-card .lugar { opacity:.5; font-size:.48rem; }
-  .texto-card .cuerpo { opacity:.8; white-space:pre-wrap; }
+  :root {
+    --escala: clamp(21px, calc(min(100vw, 100vh) * 0.042), 69px);
+    --bg:#000; --fg:#fff; --fg-muted:#aaa;
+  }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background: var(--bg);
+  }
+  body {
+    font-size: var(--escala);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    color: var(--fg);
+    line-height: 1.7;
+  }
+  #textos {
+    display:flex; flex-direction:column;
+    justify-content:center;
+    width:100%; height:100%;
+    overflow:hidden;
+    padding: 0 2em;
+  }
+  /* ⚠️ flex-shrink:0 es crítico para el autoscroll (ver comentario arriba) */
+  .tarjeta {
+    flex-shrink:0;
+    width:100%;
+    max-width:65ch;
+    margin:0 auto;
+    padding:18vh 0; /* aire arriba/abajo; forma parte del viaje del scroll */
+  }
+  .titulo {
+    font-size:1.05em;
+    font-weight:600;
+    margin-bottom:.35em;
+  }
+  .meta {
+    font-size:.62em;
+    color:var(--fg-muted);
+    margin-bottom:1em;
+  }
+  .cuerpo {
+    line-height:1.75;
+    white-space:pre-wrap;
+  }
+  .placeholder {
+    text-align:center;
+    color:var(--fg-muted);
+  }
 </style>
 </head>
 <body>
@@ -652,64 +842,123 @@ _PLANTILLA_TEXTOS_HTML = r"""<!DOCTYPE html>
 <script>
 var TEXTOS = <JSON_EMBEDDED>;
 (function(){
-  function hhmm(h){
-    if (h == null || isNaN(h)) return '';
-    var hi = Math.floor(h);
-    var mi = Math.round((h - hi) * 60);
-    if (mi === 60) { mi = 0; hi += 1; }
-    if (hi === 24) hi = 0;
-    return ('0' + hi).slice(-2) + ':' + ('0' + mi).slice(-2);
+  var cont = document.getElementById('textos');
+  var actual = -1;
+  var animId = null;
+  var ROTACION_SEG = 30; /* duración de CADA texto en pantalla, en ambos modos */
+
+  /* ── Escaping HTML ────────────────────────────────────────── */
+  /* AMP se construye por código para que la plantilla sobreviva cualquier
+     procesamiento de entidades: los reemplazos son '&amp;', '&lt;', '&gt;'. */
+  var AMP = String.fromCharCode(38);
+  function escHtml(s){
+    return s.replace(/&/g, AMP+'amp;').replace(/</g, AMP+'lt;').replace(/>/g, AMP+'gt;');
   }
-  var params = new URLSearchParams(location.search);
-  var t0 = parseFloat(params.get('t0'));
+
+  /* ── Construir tarjeta ────────────────────────────────────── */
+  function construirCard(tx){
+    var h = '';
+    if (tx.titulo){
+      h += '<div class="titulo">' + escHtml(tx.titulo) + '</div>';
+    }
+    if (tx.municipio){
+      h += '<div class="meta">' + escHtml(tx.municipio) + '</div>';
+    }
+    h += '<div class="cuerpo">' + escHtml(tx.texto || '') + '</div>';
+    return '<div class="tarjeta">' + h + '</div>';
+  }
+
+  /* ── Auto-scroll lento (requestAnimationFrame) ────────────── */
+  function cancelarAnim(){
+    if (animId){ cancelAnimationFrame(animId); animId = null; }
+  }
+
+  function iniciarScroll(tarjeta){
+    cancelarAnim();
+    cont.style.justifyContent = 'center';
+    tarjeta.style.transform = '';
+
+    /* Medir: tarjeta (incluye el aire de su padding vertical) vs contenedor */
+    var altT = tarjeta.offsetHeight;
+    var altC = cont.clientHeight;
+    if (altT <= altC) return; /* cabe: centrado, sin scroll */
+
+    /* UN único ciclo baja-subir que ocupa TODO el slot del texto. El aire del
+       padding forma parte del recorrido: al inicio se ve el aire superior, al
+       final el inferior. La velocidad emerge de dividir recorrido / tiempo. */
+    var recorrido  = altT - altC;
+    var slotMs     = ROTACION_SEG * 1000;
+    var pausaBorde = 2000;                          /* pausa arriba y abajo */
+    var faseScroll = (slotMs - 2 * pausaBorde) / 2; /* duración de cada dirección */
+
+    cont.style.justifyContent = 'flex-start';
+    tarjeta.style.transition = 'none';
+
+    var inicio = performance.now();
+    function suave(p){ /* easeInOutSine: arranca y frena suave */
+      return (1 - Math.cos(Math.PI * p)) / 2;
+    }
+    function tick(now){
+      var t = ((now - inicio) % slotMs + slotMs) % slotMs;
+      var y;
+      if (t < pausaBorde){
+        y = 0;                                          /* aire arriba visible */
+      } else if (t < pausaBorde + faseScroll){
+        y = -recorrido * suave((t - pausaBorde) / faseScroll);
+      } else if (t < pausaBorde + faseScroll + pausaBorde){
+        y = -recorrido;                                 /* aire abajo visible */
+      } else {
+        var p = (t - pausaBorde - faseScroll - pausaBorde) / faseScroll;
+        y = -recorrido * (1 - suave(p));                /* vuelve arriba */
+      }
+      tarjeta.style.transform = 'translateY(' + y + 'px)';
+      animId = requestAnimationFrame(tick);
+    }
+    animId = requestAnimationFrame(tick);
+  }
+
+  /* ── Rotación ─────────────────────────────────────────────── */
+  var params  = new URLSearchParams(location.search);
+  var t0      = parseFloat(params.get('t0'));
   var loopSecs = parseFloat(params.get('loop_secs'));
   var conReloj = isFinite(t0) && isFinite(loopSecs) && loopSecs > 0;
-  var cont = document.getElementById('textos');
-  var NODOS = [];
-  TEXTOS.forEach(function(tx){
-    var card = document.createElement('div');
-    card.className = 'texto-card';
-    var tit = document.createElement('div'); tit.className = 'titulo';
-    var horaEl = document.createElement('span'); horaEl.className = 'hora';
-    horaEl.textContent = hhmm(tx.hora) + ' ';
-    tit.appendChild(horaEl);
-    tit.appendChild(document.createTextNode(tx.titulo || ''));
-    if (tx.municipio) {
-      var lugar = document.createElement('span'); lugar.className = 'lugar';
-      lugar.textContent = ' \u00b7 ' + tx.municipio;
-      tit.appendChild(lugar);
-    }
-    var cuerpo = document.createElement('div'); cuerpo.className = 'cuerpo';
-    cuerpo.textContent = tx.texto || '';
-    card.appendChild(tit);
-    card.appendChild(cuerpo);
-    cont.appendChild(card);
-    NODOS.push(card);
-  });
-  var actual = -1;
+
   function indiceActual(){
     if (TEXTOS.length === 0) return -1;
-    if (conReloj) {
-      // Un texto a la vez: slots de igual duración en orden de ruta; el loop
-      // avanza y el texto activo rota a un ritmo estable.
-      var t = ((Date.now() - t0) / 1000) % loopSecs;
-      var slot = loopSecs / TEXTOS.length;
-      return Math.floor(t / slot) % TEXTOS.length;
+    if (conReloj){
+      /* Rotación fija: cada texto dura ROTACION_SEG segundos, arrancando
+         alineado al inicio del loop (t0) e independiente de loop_secs. */
+      var t = Math.max(0, (Date.now() - t0) / 1000);
+      return Math.floor(t / ROTACION_SEG) % TEXTOS.length;
     }
-    // Preview (sin ?t0): rota cada 6 s para mostrar el comportamiento.
-    return Math.floor((Date.now() / 1000) / 6) % TEXTOS.length;
+    /* Preview (sin ?t0): mismo paso de 30 s, anclado a la carga de página */
+    return Math.floor(Date.now() / 1000 / ROTACION_SEG) % TEXTOS.length;
   }
+
   function pintar(){
     var idx = indiceActual();
-    if (idx < 0) return;
-    if (idx !== actual) {
-      if (actual >= 0 && NODOS[actual]) NODOS[actual].classList.remove('visible');
-      NODOS[idx].classList.add('visible');
-      actual = idx;
+    if (idx === actual) return;
+    actual = idx;
+    cancelarAnim();
+    if (idx < 0 || TEXTOS.length === 0){
+      cont.innerHTML = '<div class="placeholder">\u2014</div>';
+      return;
     }
+    cont.innerHTML = construirCard(TEXTOS[idx]);
+    var tarjeta = cont.querySelector('.tarjeta');
+    if (!tarjeta) return;
+    requestAnimationFrame(function(){ iniciarScroll(tarjeta); });
   }
+
   setInterval(pintar, 250);
   pintar();
+
+  /* Re-medir en resize */
+  var resizeTimer;
+  window.addEventListener('resize', function(){
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){ actual = -1; pintar(); }, 200);
+  });
 })();
 </script>
 </body>
