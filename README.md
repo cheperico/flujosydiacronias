@@ -270,7 +270,7 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/astronomia.py` | Posición del sol (NOAA), clasificación twilight | Enriquecimiento |
 | `scripts/limpiar_tandas.py` | Selección de mejor imagen por tanda | Curación |
 | `scripts/mover_descartadas.py` | Mueve imágenes descartadas a carpeta excluir/ | Curación |
-| `scripts/td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD, 9002→TD resultado). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter; en `fluir`, si hay municipios elegidos, emite además el chat de Telegram a la tabla `fluir_telegram`, las rutas de mapas por municipio a `fluir_mapas` y genera `td/chat_fluir.html` (HTML autocontenido del chat para el Web Render TOP `web_render_chat`, sincronizado con el loop) (flags `--no-enviar-telegram` / `--no-enviar-mapas` / `--generar-chat-html`) | Instalación |
+| `scripts/td/puente_td.py` | Puente BD → TouchDesigner vía OSC (9000→TD, 9001←TD, 9002→TD resultado). Modos: `elecciones` (default) y `fluir` — el modo instalación escucha sin límite de tiempo hasta Enter; en `fluir`, si hay municipios elegidos, emite además el chat de Telegram a la tabla `fluir_telegram`, las rutas de mapas por municipio a `fluir_mapas` y genera `td/chat_fluir.html` y `td/textos_fluir.html` (HTML autocontenidos del chat y de los textos para los Web Render TOP `web_render_chat`/`web_render_textos`, sincronizados con el loop) (flags `--no-enviar-telegram` / `--no-enviar-mapas` / `--generar-chat-html` / `--generar-textos-html`) | Instalación |
 | `scripts/td/elecciones.py` | Nubes de elecciones (horas, municipios, colores, tags, días, clima) → TD vía OSC | Instalación |
 | `scripts/td/osc_probe.py` | Eco OSC: escucha lo que llega a un puerto y lo imprime (test rápido TD→Python) | Instalación |
 | `scripts/td/util_enter.py` | Helper compartido: `detener_con_enter()` devuelve un `threading.Event` (salida limpia con Enter) | Instalación |
@@ -835,6 +835,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 │   ├── osc_callbacks.dat      # Callbacks OSC In DAT
 │   ├── fluir_callbacks.dat    # Callbacks OSC In DAT canal 9002 (retorno Fluir)
 │   ├── chat_fluir.html        # HTML autocontenido del chat de Telegram (Web Render, generado)
+│   ├── textos_fluir.html      # HTML autocontenido de los textos (Web Render, generado)
 │   ├── crear_tablas_fluir.dat # Crea las tablas fluir_* en TD
 │   ├── elecciones_ui.dat      # Generación de UI de elecciones (botones)
 │   ├── flujos.toe             # Proyecto TouchDesigner

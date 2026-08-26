@@ -10,9 +10,11 @@ Modos:
                  tipo, chiches y, si hay municipios elegidos, los mensajes
                  de Telegram del chat como bloque /mensaje → fluir_telegram
                  y las rutas de mapas por municipio como bloque /mapa →
-                 fluir_mapas). Además genera un HTML autocontenido
-                 (td/chat_fluir.html) que TouchDesigner carga con un Web
-                 Render TOP (file://, cero red).
+                 fluir_mapas). Además genera dos HTMLs autocontenidos que
+                 TouchDesigner carga con Web Render TOPs (file://, cero red):
+                 - td/chat_fluir.html (chat de Telegram, web_render_chat)
+                 - td/textos_fluir.html (crónicas type='text',
+                   web_render_textos)
 
 Uso básico:
   python scripts/td/puente_td.py elecciones           # nubes de elecciones
@@ -229,6 +231,10 @@ MAX_TEXTO_TELEGRAM = 250
 # genera el puente para que TouchDesigner lo levante con un Web Render TOP.
 # Vive en td/ porque es un artefacto del parche TD (no del deploy web).
 CHAT_HTML_RELATIVO = "td/chat_fluir.html"
+
+# Ruta RELATIVA (a la raíz del proyecto) del HTML de los textos (type='text')
+# que genera el puente para el Web Render TOP `web_render_textos` de TD.
+TEXTOS_HTML_RELATIVO = "td/textos_fluir.html"
 
 
 def _parsear_fecha_utc(valor: Optional[str]) -> Optional[datetime]:
@@ -559,6 +565,158 @@ var MENSAJES = <JSON_EMBEDDED>;
 """
 
 
+def _generar_html_textos(
+    textos: list[dict],
+    ruta_salida: str,
+) -> Optional[str]:
+    """Genera el HTML autocontenido de los textos (crónicas, type='text') para TD.
+
+    Web Render TOP `web_render_textos` (file://, cero red). Embebe los textos
+    como JSON inline + el reloj del loop (?t0=&loop_secs=). Muestra UN texto a
+    la vez, rotando con el reloj del loop en orden de ruta (keypoint = t_loop).
+    Sin parámetros (preview en browser) rota cada 6 s para mostrar el
+    comportamiento.
+
+    Args:
+        textos: lista de dicts del spec (por_tipo["text"]). Cada item tiene
+            media_id, titulo (=titulo_seccion), desc (=texto_completo),
+            hora (float 0..24), keypoint/t_loop (float, posición en el loop).
+        ruta_salida: ruta del archivo HTML a escribir.
+
+    Returns:
+        Ruta absoluta del archivo escrito, o None si no se pudo generar.
+    """
+    datos: list[dict] = []
+    for medio in textos:
+        media_id = int(medio.get("media_id") or 0)
+        titulo = str(medio.get("titulo") or "")
+        texto = str(medio.get("desc") or "")
+        hora = float(medio.get("hora") or 0.0)
+        keypoint = float(medio.get("keypoint") or medio.get("t_loop") or 0.0)
+        municipio = str(medio.get("municipio") or "")
+        datos.append({
+            "media_id": media_id,
+            "titulo": titulo,
+            "texto": texto,
+            "hora": hora,
+            "keypoint": keypoint,
+            "municipio": municipio,
+        })
+    # Orden estable de ruta: los textos rotan en el orden en que aparecen en el
+    # loop (keypoint = t_loop). Los que comparten keypoint se ordenan por media_id.
+    datos.sort(key=lambda d: (d["keypoint"], d["media_id"]))
+
+    json_cadena = json.dumps(datos, ensure_ascii=False)
+    json_cadena = json_cadena.replace("</", "<\\/")
+
+    html = _PLANTILLA_TEXTOS_HTML.replace("<JSON_EMBEDDED>", json_cadena)
+
+    try:
+        Path(ruta_salida).parent.mkdir(parents=True, exist_ok=True)
+        with open(ruta_salida, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        log.info("  Textos HTML escrito: %s (%d textos)", ruta_salida, len(datos))
+        return os.path.abspath(ruta_salida)
+    except OSError as exc:
+        log.error("  Error escribiendo HTML de textos: %s", exc)
+        return None
+
+
+# Plantilla del HTML autocontenido de los textos (crónicas, type='text').
+# El placeholder <JSON_EMBEDDED> se reemplaza por el JSON serializado de los
+# textos (con escapes de </script>). Muestra UN texto a la vez, rotando con el
+# reloj del loop (?t0=&loop_secs=) en orden de ruta (keypoint); sin reloj
+# (preview) rota cada 6 s.
+_PLANTILLA_TEXTOS_HTML = r"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flujos · Textos (TD)</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; font-family:system-ui,'Segoe UI',sans-serif; background:transparent; }
+  :root { --tr:200; --tg:200; --tb:200; --ar:255; --ag:200; --ab:100; }
+  #textos { display:flex; flex-direction:column; justify-content:center; gap:.35rem; width:100%; height:100%; min-height:0; overflow-y:auto; padding:.4rem .5rem; color:rgb(var(--tr),var(--tg),var(--tb)); scrollbar-width:none; }
+  #textos::-webkit-scrollbar { display:none; }
+  .texto-card { font-size:.6rem; line-height:1.5; padding:.4rem 0; opacity:0; transition:opacity .7s ease; }
+  .texto-card.visible { opacity:1; }
+  .texto-card .titulo { font-weight:600; letter-spacing:.06em; color:rgb(var(--ar),var(--ag),var(--ab)); margin-bottom:.2rem; }
+  .texto-card .hora { opacity:.5; font-size:.48rem; margin-right:.3rem; }
+  .texto-card .lugar { opacity:.5; font-size:.48rem; }
+  .texto-card .cuerpo { opacity:.8; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<div id="textos"></div>
+<script>
+var TEXTOS = <JSON_EMBEDDED>;
+(function(){
+  function hhmm(h){
+    if (h == null || isNaN(h)) return '';
+    var hi = Math.floor(h);
+    var mi = Math.round((h - hi) * 60);
+    if (mi === 60) { mi = 0; hi += 1; }
+    if (hi === 24) hi = 0;
+    return ('0' + hi).slice(-2) + ':' + ('0' + mi).slice(-2);
+  }
+  var params = new URLSearchParams(location.search);
+  var t0 = parseFloat(params.get('t0'));
+  var loopSecs = parseFloat(params.get('loop_secs'));
+  var conReloj = isFinite(t0) && isFinite(loopSecs) && loopSecs > 0;
+  var cont = document.getElementById('textos');
+  var NODOS = [];
+  TEXTOS.forEach(function(tx){
+    var card = document.createElement('div');
+    card.className = 'texto-card';
+    var tit = document.createElement('div'); tit.className = 'titulo';
+    var horaEl = document.createElement('span'); horaEl.className = 'hora';
+    horaEl.textContent = hhmm(tx.hora) + ' ';
+    tit.appendChild(horaEl);
+    tit.appendChild(document.createTextNode(tx.titulo || ''));
+    if (tx.municipio) {
+      var lugar = document.createElement('span'); lugar.className = 'lugar';
+      lugar.textContent = ' \u00b7 ' + tx.municipio;
+      tit.appendChild(lugar);
+    }
+    var cuerpo = document.createElement('div'); cuerpo.className = 'cuerpo';
+    cuerpo.textContent = tx.texto || '';
+    card.appendChild(tit);
+    card.appendChild(cuerpo);
+    cont.appendChild(card);
+    NODOS.push(card);
+  });
+  var actual = -1;
+  function indiceActual(){
+    if (TEXTOS.length === 0) return -1;
+    if (conReloj) {
+      // Un texto a la vez: slots de igual duración en orden de ruta; el loop
+      // avanza y el texto activo rota a un ritmo estable.
+      var t = ((Date.now() - t0) / 1000) % loopSecs;
+      var slot = loopSecs / TEXTOS.length;
+      return Math.floor(t / slot) % TEXTOS.length;
+    }
+    // Preview (sin ?t0): rota cada 6 s para mostrar el comportamiento.
+    return Math.floor((Date.now() / 1000) / 6) % TEXTOS.length;
+  }
+  function pintar(){
+    var idx = indiceActual();
+    if (idx < 0) return;
+    if (idx !== actual) {
+      if (actual >= 0 && NODOS[actual]) NODOS[actual].classList.remove('visible');
+      NODOS[idx].classList.add('visible');
+      actual = idx;
+    }
+  }
+  setInterval(pintar, 250);
+  pintar();
+})();
+</script>
+</body>
+</html>
+"""
+
+
 # ── Mapas por municipio (ruta al HTML generado por mapas_municipio.py) ────────
 
 # Variante del mapa que se envía a TD. Las posibles viven en
@@ -616,6 +774,7 @@ def _procesar_rafaga(
     enviar_telegram: bool = True,
     enviar_mapas: bool = True,
     generar_chat_html: bool = True,
+    generar_textos_html: bool = True,
 ) -> Optional[str]:
     """
     Genera el spec del loop con loop_db.generar_loop, lo escribe a archivo y
@@ -668,6 +827,8 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
         enviar_mapas: si se envían las rutas de mapas por municipio (default True).
         generar_chat_html: si se escribe el HTML autocontenido del chat
             (td/chat_fluir.html) para el Web Render de TD (default True).
+        generar_textos_html: si se escribe el HTML autocontenido de los textos
+            (td/textos_fluir.html) para el Web Render de TD (default True).
 
     Returns:
         Ruta del spec escrita, o None si no se pudo generar.
@@ -686,6 +847,7 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
     ruta_spec = str(ruta_spec)
 
     ruta_chat_html = Path(__file__).resolve().parents[2] / CHAT_HTML_RELATIVO
+    ruta_textos_html = Path(__file__).resolve().parents[2] / TEXTOS_HTML_RELATIVO
 
     spec = loop_db.generar_loop(
         db_path=db_path,
@@ -708,6 +870,16 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
     # Separación de videos 360° (marcador es_360 del spec): los normales van a
     # fluir_videos y los 360 a fluir_videos_360 en la emisión por 9002.
     videos_normales, videos_360 = _separar_videos_360(por_tipo)
+
+    # HTML autocontenido de los textos (type='text') para el Web Render de TD.
+    # Se escribe SIEMPRE que generar_textos_html esté activo (aunque haya 0
+    # textos), para que td/textos_fluir.html exista y el Web Render tenga a qué
+    # apuntar. Canal OSC intacto.
+    if generar_textos_html:
+        ruta_textos = _generar_html_textos(
+            por_tipo.get("text", []) or [], str(ruta_textos_html))
+        if not ruta_textos:
+            log.warning("  No se pudo escribir el HTML de textos.")
 
     # Mensajes de Telegram del chat: solo si el visitante eligió municipio(s).
     # Acompañan al loop (cada uno con su hora local), no son medios del arco.
@@ -860,6 +1032,7 @@ def modo_fluir(
     enviar_telegram: bool = True,
     enviar_mapas: bool = True,
     generar_chat_html: bool = True,
+    generar_textos_html: bool = True,
 ) -> None:
     """
     Modo "Fluir": escucha la ráfaga de selección de TD, la acumula por grupo,
@@ -886,6 +1059,8 @@ def modo_fluir(
             (solo cuando hay municipios elegidos; False → sin bloque /mapa).
         generar_chat_html: si se escribe el HTML autocontenido del chat
             (td/chat_fluir.html) para el Web Render de TD (default True).
+        generar_textos_html: si se escribe el HTML autocontenido de los textos
+            (td/textos_fluir.html) para el Web Render de TD (default True).
     """
     selecciones: dict[str, list[str]] = {}
     ultimo_mensaje = time.monotonic()
@@ -932,6 +1107,7 @@ def modo_fluir(
                     enviar_telegram=enviar_telegram,
                     enviar_mapas=enviar_mapas,
                     generar_chat_html=generar_chat_html,
+                    generar_textos_html=generar_textos_html,
                 )
                 selecciones.clear()
                 if una_vez:
@@ -965,6 +1141,7 @@ Ejemplos:
   python scripts/td/puente_td.py fluir --no-enviar-telegram      # sin mensajes de Telegram
   python scripts/td/puente_td.py fluir --no-enviar-mapas         # sin rutas de mapas por municipio
   python scripts/td/puente_td.py fluir --no-generar-chat-html   # sin HTML del chat (solo OSC)
+  python scripts/td/puente_td.py fluir --no-generar-textos-html  # sin HTML de textos (solo OSC)
 
 Probar "fluir" sin TouchDesigner (3 terminales):
 
@@ -1018,6 +1195,12 @@ Probar "fluir" sin TouchDesigner (3 terminales):
                              "(td/chat_fluir.html) para el Web Render de TD "
                              "(default: True). Con --no-generar-chat-html no "
                              "se genera.")
+    parser.add_argument("--generar-textos-html", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Escribir el HTML autocontenido de los textos "
+                             "(td/textos_fluir.html) para el Web Render de TD "
+                             "(default: True). Con --no-generar-textos-html no "
+                             "se genera.")
     parser.add_argument("--host", default=OSC_HOST,
                         help=f"Host TD (default: {OSC_HOST})")
     parser.add_argument("--port", type=int, default=OSC_PUERTO_TD,
@@ -1050,6 +1233,7 @@ Probar "fluir" sin TouchDesigner (3 terminales):
             enviar_telegram=args.enviar_telegram,
             enviar_mapas=args.enviar_mapas,
             generar_chat_html=args.generar_chat_html,
+            generar_textos_html=args.generar_textos_html,
         )
 
     return 0

@@ -53,6 +53,8 @@ Python: puente_td.py modo fluir
     │           └─ /fin      → fluir_estado.fin=1 + cotejo y backfill de textos con td/spec_fluir.json
     │                         + recarga web_render_chat (Web Render TOP) hacia
     │                           td/chat_fluir.html?t0=&loop_secs= (chat HTML del lote)
+    │                         + recarga web_render_textos (Web Render TOP) hacia
+    │                           td/textos_fluir.html?t0=&loop_secs= (textos HTML del lote)
    ▼
    (consumo, opcional según etapa visual)
    ├── fluir_estado      (Table DAT clave-valor: total, loop_secs, por tipo, fin, recibidos/esperados)
@@ -833,6 +835,15 @@ parsear código dentro de los operadores de renderizado.
 | `fluir_telegram` | Table DAT | `id`, `from_name`, `texto`, `hora`, `fecha`, `tipo`, `fotos`, `municipio` — chat de Telegram de los municipios elegidos (desde `/mensaje`; `hora` = local UTC−3, `fotos` = JSON de media_ids) |
 | `fluir_mapas` | Table DAT | `municipio`, `ruta` — ruta **absoluta** al mapa HTML de cada municipio elegido (desde `/mapa`; el HTML lo genera `scripts/mapas_municipio.py`, variante `ruta`) |
 
+> **Textos HTML (Web Render)**: mismo patrón que el chat — `puente_td.py` genera
+> `td/textos_fluir.html` (HTML **autocontenido**, cero red) con los textos del lote
+> (`type='text'`, `titulo` + `texto_completo`, ordenados por ruta vía `keypoint`) y en
+> cada `/fin` el callbacks apunta el Web Render TOP `web_render_textos` a
+> `td/textos_fluir.html?t0=<epoch_ms>&loop_secs=<N>`. La página muestra **UN texto a la
+> vez**, rotando a medida que avanza el loop (slots de igual duración en orden de ruta);
+> sin `?t0` (vista previa) rota cada 6 s. Canal OSC `/texto` → `fluir_textos` intacto
+> como respaldo/estado.
+>
 > **Chat HTML (Web Render)**: además del canal OSC (`/mensaje` → `fluir_telegram`, intacto
 > como respaldo/estado), el puente genera `td/chat_fluir.html` — HTML **autocontenido**
 > (datos embebidos, cero red, mismo principio que los mapas) que renderiza el chat y lo
@@ -973,6 +984,10 @@ de pipeline visual, pero los nombres y tablas quedan disponibles.
       `file:///.../td/chat_fluir.html` (ruta absoluta); el callbacks lo recarga en
       cada `/fin` con `?t0=<epoch_ms>&loop_secs=<N>` (el HTML lo genera `puente_td.py`
       durante la ráfaga; el chat revela mensajes sincronizado con el loop, cero red).
+- [ ] **`web_render_textos`** — Web Render TOP en `/project2`, URL inicial
+      `file:///.../td/textos_fluir.html` (ruta absoluta); el callbacks lo recarga en
+      cada `/fin` con `?t0=<epoch_ms>&loop_secs=<N>` (el HTML lo genera `puente_td.py`
+      durante la ráfaga; los textos se revelan sincronizados con el loop, cero red).
 - [ ] (Opcional, etapa visual) **`fluir_loop`** Timeline CHOP; **`fluir_movie`**
       Movie File In TOP; **`fluir_engine`** Script DAT con el planificador (scheduler).
 - [ ] Verificación de punta a punta (3 terminales):
@@ -1003,6 +1018,7 @@ de pipeline visual, pero los nombres y tablas quedan disponibles.
 | 12 | Backfill anti-pérdida de textos + fix de API Table DAT | **Resuelta** | al `/fin`, `_completar_textos_desde_spec()` completa `titulo`/`texto` en `fluir_textos` desde `td/spec_fluir.json` cuando el mensaje `/flujos/fluir/texto` se pierde por UDP (ráfagas grandes); celdas de Table DAT se escriben con `tabla[fila, col] = valor` (`setCell` no existe en `td.tableDAT`) |
 | 13 | Chat de Telegram en el Fluir | **Resuelta** | tabla propia `fluir_telegram` (no es medio del loop: sin keypoint; `hora` = local UTC−3 de llegada). Se envía dentro de `_procesar_rafaga` SOLO si hay municipios elegidos (bloque `/tabla telegram` + `/mensaje` ×N), replicando el criterio web (rango de fechas de los medios del municipio, `es_sistema=0`, texto truncado a 250 chars, `fotos` como JSON de media_ids). No cuenta en los `recibidos/esperados` del `/fin`; el resumen lo reporta como `telegram=N` |
 | 14 | Chat de Telegram renderizado en HTML para TD | **Resuelta** | además del OSC (`/mensaje` → `fluir_telegram`, intacto), `puente_td.py --generar-chat-html` (default) genera `td/chat_fluir.html` (autocontenido, cero red; fotos como data URIs) y el callbacks lo recarga en `/fin` con `?t0=&loop_secs=` → el Web Render TOP `web_render_chat` muestra el chat sincronizado con la hora del loop (revelado acumulativo por `hora` local). El canal OSC queda como respaldo/estado |
+| 15 | Textos renderizados en HTML para TD | **Resuelta** | mismo patrón que el chat: `puente_td.py --generar-textos-html` (default) genera `td/textos_fluir.html` (autocontenido, cero red; `titulo` + `texto_completo` por texto, ordenados por ruta vía `keypoint`) y el callbacks lo recarga en `/fin` con `?t0=&loop_secs=` → el Web Render TOP `web_render_textos` muestra **UN texto a la vez**, rotando en orden de ruta a medida que avanza el loop (slots de igual duración); sin `?t0` rota cada 6 s. Canal OSC `/texto` → `fluir_textos` intacto |
 | 14 | Mapas por municipio en el Fluir (fase 1: solo ruta) | **Resuelta** | tabla propia `fluir_mapas` (no es medio del loop). El puente envía `/flujos/fluir/mapa <municipio> <ruta>` × municipios elegidos, con la ruta **absoluta** al mapa HTML generado por `scripts/mapas_municipio.py` (el nombre de archivo es **exactamente** el de `_nombre_archivo` para la variante configurada — `VARIANTE_MAPA_MUNICIPIO`, default `ruta`: `mapas/mapa_municipio_<municipio>_ruta.html`, slug ASCII sin acentos: `'Río Hondo'`→`Rio_Hondo`; plantilla `PLANTILLA_MAPA_MUNICIPIO`, ajustable; la ruta completa = raíz del proyecto + ese archivo). El HTML **no viaja por OSC** (evita el límite de tamaño del mensaje); TD decide cómo renderizarlo (p. ej. Web Render TOP). No cuenta en `recibidos/esperados` del `/fin`. **Fase 2 pendiente**: capas extra al mapa (marcadores por tags/colores), Web Render Source=DAT editable, sync con el loop |
 
 ---
