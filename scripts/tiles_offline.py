@@ -3,12 +3,12 @@
 tiles_offline.py — Mapas Folium autocontenidos para TouchDesigner (cero red).
 
 Los mapas por municipio que renderiza TouchDesigner (Web Render TOP sobre
-`file://`) descargaban de internet, en runtime, sus tiles de CartoDB Y los
-assets JS/CSS de Folium (Leaflet, jQuery, Bootstrap, FontAwesome...) de varios
-CDNs. El Web Render TOP usa CEF con un proceso de navegador por TOP y una cache
-temporal que se borra al salir → cada mapa re-descargaba todo desde cero, y la
-página quedaba en blanco hasta resolver los assets (cuello de botella con varios
-mapas abiertos a la vez).
+`file://`) descargaban de internet, en runtime, sus tiles de Esri (antes CartoDB)
+Y los assets JS/CSS de Folium (Leaflet, jQuery, Bootstrap, FontAwesome...) de
+varios CDNs. El Web Render TOP usa CEF con un proceso de navegador por TOP y una
+cache temporal que se borra al salir → cada mapa re-descargaba todo desde cero,
+y la página quedaba en blanco hasta resolver los assets (cuello de botella con
+varios mapas abiertos a la vez).
 
 Este módulo hace cada HTML 100% autocontenido en dos planos:
   1. TILES de la vista inicial → data URIs base64 (ver abajo).
@@ -22,10 +22,15 @@ Tiles (UNA sola capa, sin doble descarga):
   El mapa se crea SIN capa base (folium.Map(tiles=None)) y `incrustar_tiles_vista_inicial`
   inyecta un L.TileLayer custom que, para los tiles de la vista inicial,
   devuelve el data URI incrustado y, para los demás, delega en la URL online de
-  CartoDB. Al ser la única capa, la zona de la vista inicial NO se descarga dos
-  veces (el mapa base de Folium no existe). Si la descarga falla o `zooms` es
-  vacío, se inyecta la capa igualmente (dict vacío) y el mapa funciona 100%
-  online.
+  Esri Light Gray. Al ser la única capa, la zona de la vista inicial NO se
+  descarga dos veces (el mapa base de Folium no existe). Si la descarga falla o
+  `zooms` es vacío, se inyecta la capa igualmente (dict vacío) y el mapa
+  funciona 100% online.
+
+  NOTA 2026-08-26: CartoDB dejó de servir sus tiles públicos sin API key (overlay
+  "API KEY REQUIRED", ver home-assistant/frontend#53800). Se reemplazó por Esri
+  World Light Gray (Canvas), estilo claro equivalente, SIN key. URL:
+  https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}
 
 Zooms por defecto: 11-13 (aprobado por el usuario). Si el zoom inicial que
 elegiría `fitBounds` cae fuera de ese rango (municipios muy chicos/grandes), se
@@ -51,12 +56,17 @@ import urllib.request
 
 log = logging.getLogger("tiles_offline")
 
-# URL de tiles CartoDB positron (light_all), misma que usa Folium para
-# 'CartoDB positron'. Se descarga sin retina ({r}).
-TILE_URL_CARTO = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
-SUBDOMINIOS = "abcd"
+# URL de tiles Esri World Light Gray (Canvas). Misma que usa mapa_ruta.py para
+# el tile default. Sin subdominios ({s}); orden {z}/{y}/{x} (diferente de Carto).
+TILE_URL_ESRI = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"
+    "World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+)
+# Deprecated: CartoDB positron (requiere API key desde 2026-08-26).
+# TILE_URL_CARTO = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
 ZOOMS_DEFAULT = [11, 12, 13]
-CACHE_DIR_DEFAULT = "tiles_cache"
+# Cache de tiles versionado por proveedor (Esri ≠ Carto en estilo).
+CACHE_DIR_DEFAULT = "tiles_cache/esri"
 CACHE_DIR_ASSETS_DEFAULT = "assets_cache"
 # Zoom mínimo/máximo absolutos para el recorte del rango embebido.
 ZOOM_MIN_ABS = 4
@@ -176,7 +186,7 @@ def descargar_tiles_png(
         for (z, x, y) in pendientes:
             ruta = os.path.join(cache_dir, str(z), str(x), f"{y}.png")
             try:
-                url = TILE_URL_CARTO.format(s="a", z=z, x=x, y=y)
+                url = TILE_URL_ESRI.format(z=z, y=y, x=x)
                 req = urllib.request.Request(
                     url,
                     headers={"User-Agent": "flujos-tiles-offline/1.0"},
@@ -226,14 +236,12 @@ def js_capa_base_embebida(
     """
     tiles_json = json.dumps(tiles, separators=(",", ":"))
     nombre_json = json.dumps(variable_mapa)
-    online_json = json.dumps(TILE_URL_CARTO)
-    subs_json = json.dumps(SUBDOMINIOS)
+    online_json = json.dumps(TILE_URL_ESRI)
     atribucion_json = json.dumps(atribucion)
     return f"""
 (function() {{
   var _tiles = {tiles_json};
   var _online = {online_json};
-  var _subs = {subs_json};
   var _atribucion = {atribucion_json};
   var _nombre = {nombre_json};
   function _inicializar(_mapa) {{
@@ -245,7 +253,6 @@ def js_capa_base_embebida(
       }}
     }});
     var _capa = new _CapaBase(_online, {{
-      subdomains: _subs,
       attribution: _atribucion
     }});
     _capa.addTo(_mapa);

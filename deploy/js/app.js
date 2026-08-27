@@ -876,9 +876,9 @@
     function crearMapaLeaflet(el) {
         var map = L.map(el, { zoomControl: false, attributionControl: true }).setView([-34.5, -64], 4);
         L.control.zoom({ position: 'topright' }).addTo(map);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
+        // Esri World Light Gray (Canvas) — CartoDB deprecado (exige API key desde 26-ago-2026)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors',
             maxZoom: 19
         }).addTo(map);
         map.grupo = L.layerGroup().addTo(map);

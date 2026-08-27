@@ -7,6 +7,21 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 46] — 2026-08-26
+
+### Cambiado
+- **Servidor de tiles: CartoDB → Esri World Light Gray** (Carto dejó de servir tiles públicos sin API key el 26-ago-2026, overlay "API KEY REQUIRED"; ver `home-assistant/frontend#53800`).
+  - `scripts/mapa_ruta.py`: nuevo `TILE_ESRI_URL` (`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}` — **orden `{z}/{y}/{x}`**, distinto de Carto, sin `{s}` de subdominios) y `ATTR_ESRI` como atribución por defecto. `TILE_CARTO`/`ATTR_CARTO` quedan **deprecados** en comentario (requieren API key).
+  - `scripts/tiles_offline.py`: `TILE_URL_CARTO` → `TILE_URL_ESRI`; eliminado `SUBDOMINIOS` (Esri no usa subdominios); la descarga de tiles y el JS de la capa embebida (`js_capa_base_embebida`) usan la URL Esri sin `subdomains`. **Cache versionada por proveedor**: `tiles_cache/` → `tiles_cache/esri/` (evita mezclar estilos Carto/Esri).
+  - `scripts/mapas_municipio.py`: importa `ATTR_ESRI` (y `TILE_DEFAULT` que ahora apunta a Esri); docstrings actualizados.
+  - `deploy/js/app.js`: el mapa Leaflet del deploy web (`crearMapaLeaflet`) también usaba CartoDB — ahora usa la URL Esri (sin `subdomains`).
+- Verificado: tile Esri descarga `image/jpeg` 200 sin key; mapa de ruta y 296/296 mapas de municipio regenerados con Esri (**0** con `cartocdn`, **0** con overlay "API KEY REQUIRED", **0** sin tiles); segunda corrida usa `tiles_cache/esri/` sin re-descargar.
+
+### Documentación
+- **AGENTS.md**: filas de `mapa_ruta.py`, `mapas_municipio.py` y `tiles_offline.py` (Esri Light Gray en vez de CartoDB; cache `tiles_cache/esri`).
+
+---
+
 ## [Entrega 45] — 2026-08-26
 
 ### Cambiado

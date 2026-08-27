@@ -39,9 +39,9 @@ Tiles de la vista inicial:
     como data URIs base64 (scripts/tiles_offline.py). Al abrir el mapa en
     TouchDesigner (Web Render TOP sobre file://) la vista inicial se muestra al
     instante, sin descargar de internet; el zoom/desplazamiento posterior sigue
-    usando la capa online. No requiere servidor. Los tiles se cachean en
-    `tiles_cache/` (compartido entre municipios). Flag --no-embebido para
-    deshabilitarlo.
+    usando la capa online (Esri Light Gray). No requiere servidor. Los tiles se
+    cachean en `tiles_cache/esri/` (compartido entre municipios). Flag
+    --no-embebido para deshabilitarlo.
 
 HTML autocontenido (assets):
     Además de los tiles, el HTML se guarda con `guardar_autocontenido`
@@ -88,7 +88,8 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 from scripts.mapa_ruta import (  # noqa: E402
-    ATTR_CARTO,
+    ATTR_ESRI,
+    TILE_DEFAULT,
     RUTA_COLOR,
     _crear_popup,
     _agregar_leyenda_gradiente,
@@ -296,8 +297,8 @@ def _incrustar_tiles_vista_inicial(
 
     Una sola capa de tiles (Folium crea el mapa sin tiles): para los tiles de
     la vista inicial devuelve data URIs base64 (se muestran al instante en TD,
-    sin red) y para el resto delega en CartoDB online. No requiere servidor y
-    no descarga dos veces la misma zona.
+    sin red) y para el resto delega en el servidor de tiles online (Esri Light
+    Gray). No requiere servidor y no descarga dos veces la misma zona.
 
     Returns:
         Cantidad de tiles incrustados (0 si embebido=False o si falló la
@@ -309,11 +310,11 @@ def _incrustar_tiles_vista_inicial(
     lons = [p["lon"] for p in puntos]
     if embebido:
         return incrustar_tiles_vista_inicial(
-            mapa, lats, lons, zooms=zooms, cache_dir=tiles_cache, atribucion=ATTR_CARTO
+            mapa, lats, lons, zooms=zooms, cache_dir=tiles_cache, atribucion=ATTR_ESRI
         )
     # Sin embebido: inyectar igual la capa (online) para no dejar el mapa sin tiles.
     return incrustar_tiles_vista_inicial(
-        mapa, lats, lons, zooms=[], cache_dir=tiles_cache, atribucion=ATTR_CARTO
+        mapa, lats, lons, zooms=[], cache_dir=tiles_cache, atribucion=ATTR_ESRI
     )
 
 

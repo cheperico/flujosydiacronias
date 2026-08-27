@@ -234,6 +234,15 @@ Etapa 5: INSTALACIÓN          →  TouchDesigner + motor de deriva
   - Verificado: DB actualizada (1376 ahora con lat/lon real, 7 videos con GPS limpiado),
     296/296 mapas regenerados.
 
+- **2026-08-26:** **Servidor de tiles: CartoDB → Esri World Light Gray.**
+  - Carto dejó de servir sus tiles públicos sin API key (overlay "API KEY REQUIRED",
+    ver `home-assistant/frontend#53800`). Se reemplaza por Esri World Light Gray
+    (Canvas), estilo claro equivalente, **sin key**.
+  - `mapa_ruta.py` (`TILE_ESRI_URL` + `ATTR_ESRI`, orden `{z}/{y}/{x}`), `tiles_offline.py`
+    (`TILE_URL_ESRI`, sin subdominios, **cache versionada** `tiles_cache/esri/`) y
+    `deploy/js/app.js` (mapa Leaflet del deploy web).
+  - Verificado: 296/296 mapas regenerados con Esri, 0 con cartocdn, 0 con overlay.
+
 - **2026-08-16:** **Inferencia de hora de textos por interpolación en el track GPX.**
   - Los textos (`type='text'`) sin fecha solo obtienen su fecha/hora interpolando
     su posición (lat/lon) contra el track GPX (posición → tiempo): los 2 puntos

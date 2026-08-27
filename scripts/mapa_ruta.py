@@ -82,11 +82,24 @@ RUTA_COLOR = "#3388ff"
 RUTA_OPACITY = 0.8
 RUTA_WEIGHT = 4
 
-# Tile por defecto (CartoDB positron — estilo claro, elegante)
-TILE_CARTO = "CartoDB positron"
+# Tile por defecto: Esri World Light Gray (Canvas) — estilo claro como CartoDB
+# positron pero SIN API key (desde 2026-08-26 Carto exige key, ver
+# home-assistant/frontend#53800). Esri usa URL custom con orden {z}/{y}/{x}.
+TILE_ESRI_URL = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"
+    "World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+)
 TILE_OSM = "OpenStreetMap"
-TILE_DEFAULT = TILE_CARTO
+# CartoDB positron (DEPRECADO: requiere API key desde 26-ago-2026)
+# TILE_CARTO = "CartoDB positron"
+TILE_DEFAULT = TILE_ESRI_URL
 
+ATTR_ESRI = (
+    '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, '
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+)
+
+# Deprecated: atribución CartoDB (requiere API key desde 26-ago-2026)
 ATTR_CARTO = (
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
     'contributors &copy; <a href="https://carto.com/">CARTO</a>'
@@ -291,7 +304,7 @@ def generar_mapa(
         location=[centro_lat, centro_lon],
         zoom_start=10,
         tiles=TILE_DEFAULT,
-        attr=ATTR_CARTO,
+        attr=ATTR_ESRI,
         control_scale=True,
     )
 
