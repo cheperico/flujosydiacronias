@@ -721,8 +721,10 @@ def _generar_html_textos(
     Web Render TOP `web_render_textos` (file://, cero red). Embebe los textos
     como JSON inline + el reloj del loop (?t0=&loop_secs=). Muestra UN texto a
     la vez: cada texto dura 30 s (rotación fija por orden de ruta, alineada al
-    arranque del loop vía t0). Si un texto no entra en pantalla, hace UN ciclo
-    baja-subir ocupando esos 30 s, incluyendo el aire vertical.
+    arranque del loop vía t0). Si un texto no entra en pantalla, hace UN SOLO
+    descenso en esos 30 s (5 s pausa arriba → 23 s descenso → 2 s pausa al
+    final; el texto se lee una vez, sin vuelta al comienzo), incluyendo el
+    aire vertical.
 
     Args:
         textos: lista de dicts del spec (por_tipo["text"]). Cada item tiene
@@ -776,8 +778,10 @@ def _generar_html_textos(
 # ⚠️ .tarjeta REQUIERE flex-shrink:0 — sin él, flex comprime la tarjeta al alto
 # del contenedor y la medición del autoscroll nunca detecta overflow.
 # Mecánica: rebuild por rotación (30 s fijos por texto, ambos modos),
-# auto-scroll de UN ciclo baja-subir por slot (anclado a esos 30 s, incluye
-# el aire del padding vertical), handler de resize. El placeholder
+# auto-scroll de UN SOLO descenso por slot (5 s pausa arriba → 23 s descenso
+# continuo → 2 s pausa al final; sin vuelta al comienzo — el texto se lee una
+# vez y la rotación reemplaza; incluye el aire del padding vertical), reloj
+# alineado al slot (t0 + idx*ROTACION_SEG), handler de resize. El placeholder
 # <JSON_EMBEDDED> se reemplaza por el JSON serializado de los textos
 # (con escapes de </script>).
 _PLANTILLA_TEXTOS_HTML = r"""<!DOCTYPE html>
@@ -868,10 +872,22 @@ var TEXTOS = <JSON_EMBEDDED>;
     return '<div class="tarjeta">' + h + '</div>';
   }
 
-  /* ── Auto-scroll lento (requestAnimationFrame) ────────────── */
+  /* ── Auto-scroll: UN solo descenso por slot (texto se lee una vez) ──────── */
+  var PAUSA_INICIAL_MS = 5000;   /* quieto arriba: se ve el comienzo del texto */
+  var FASE_SCROLL_MS   = 23000;  /* descenso continuo hasta el final */
+  var PAUSA_FINAL_MS   = 2000;   /* quieto al final: se termina de leer */
+  var SLOT_MS          = PAUSA_INICIAL_MS + FASE_SCROLL_MS + PAUSA_FINAL_MS;
+
   function cancelarAnim(){
     if (animId){ cancelAnimationFrame(animId); animId = null; }
   }
+
+  /* Reloj base del slot (definido tras conReloj, abajo). El descenso se ancla
+     al OFFSET dentro del slot actual ((Date.now()-relojSlot) % SLOT_MS), el
+     mismo reloj que usa indiceActual para elegir el texto: así ocupa
+     exactamente el slot y ocurre una sola vez. relojSlot = t0 si ?t0, o la
+     carga de la página en preview. */
+  var relojSlot = null;
 
   function iniciarScroll(tarjeta){
     cancelarAnim();
@@ -883,33 +899,30 @@ var TEXTOS = <JSON_EMBEDDED>;
     var altC = cont.clientHeight;
     if (altT <= altC) return; /* cabe: centrado, sin scroll */
 
-    /* UN único ciclo baja-subir que ocupa TODO el slot del texto. El aire del
+    /* El texto se lee UNA sola vez en su slot: pausa arriba (5 s), descenso
+       continuo (23 s) hasta el final, pausa al final (2 s). El aire del
        padding forma parte del recorrido: al inicio se ve el aire superior, al
-       final el inferior. La velocidad emerge de dividir recorrido / tiempo. */
-    var recorrido  = altT - altC;
-    var slotMs     = ROTACION_SEG * 1000;
-    var pausaBorde = 2000;                          /* pausa arriba y abajo */
-    var faseScroll = (slotMs - 2 * pausaBorde) / 2; /* duración de cada dirección */
+       final el inferior. No hay vuelta al comienzo: al terminar el slot la
+       rotación reemplaza el texto. */
+    var recorrido = altT - altC;
 
     cont.style.justifyContent = 'flex-start';
     tarjeta.style.transition = 'none';
 
-    var inicio = performance.now();
     function suave(p){ /* easeInOutSine: arranca y frena suave */
       return (1 - Math.cos(Math.PI * p)) / 2;
     }
-    function tick(now){
-      var t = ((now - inicio) % slotMs + slotMs) % slotMs;
+    function tick(){
+      var t = ((Date.now() - relojSlot) % SLOT_MS + SLOT_MS) % SLOT_MS;
       var y;
-      if (t < pausaBorde){
+      if (t < PAUSA_INICIAL_MS){
         y = 0;                                          /* aire arriba visible */
-      } else if (t < pausaBorde + faseScroll){
-        y = -recorrido * suave((t - pausaBorde) / faseScroll);
-      } else if (t < pausaBorde + faseScroll + pausaBorde){
-        y = -recorrido;                                 /* aire abajo visible */
+      } else if (t < PAUSA_INICIAL_MS + FASE_SCROLL_MS){
+        y = -recorrido * suave((t - PAUSA_INICIAL_MS) / FASE_SCROLL_MS);
       } else {
-        var p = (t - pausaBorde - faseScroll - pausaBorde) / faseScroll;
-        y = -recorrido * (1 - suave(p));                /* vuelve arriba */
+        y = -recorrido;                                 /* aire abajo visible */
+        cancelarAnim();                                 /* slot completo: fin */
+        return;
       }
       tarjeta.style.transform = 'translateY(' + y + 'px)';
       animId = requestAnimationFrame(tick);
@@ -922,6 +935,7 @@ var TEXTOS = <JSON_EMBEDDED>;
   var t0      = parseFloat(params.get('t0'));
   var loopSecs = parseFloat(params.get('loop_secs'));
   var conReloj = isFinite(t0) && isFinite(loopSecs) && loopSecs > 0;
+  relojSlot = conReloj ? t0 : Date.now();
 
   function indiceActual(){
     if (TEXTOS.length === 0) return -1;

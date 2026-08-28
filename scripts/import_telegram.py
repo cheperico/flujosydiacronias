@@ -255,7 +255,7 @@ def ingerir_media_telegram(
     duplica.
     Retorna el id del medio insertado, o None si falla.
     """
-    abs_path = os.path.normpath(os.path.join(export_path, file_rel_path))
+    abs_path = os.path.abspath(os.path.join(export_path, file_rel_path))
     if not os.path.isfile(abs_path):
         log.warning("  Archivo no encontrado (aún descargándose?): %s", file_rel_path)
         return None
@@ -284,7 +284,7 @@ def ingerir_media_telegram(
     carpeta = carpeta_original
 
     if destino:
-        destino_norm = os.path.normpath(destino)
+        destino_norm = os.path.abspath(destino)
         # Subcarpeta telegram/ para mantener orden
         dest_dir = os.path.join(destino_norm, "telegram")
         os.makedirs(dest_dir, exist_ok=True)
@@ -398,7 +398,7 @@ def procesar_export(
         "errores": 0,
     }
 
-    export_path = os.path.normpath(export_path)
+    export_path = os.path.abspath(export_path)
 
     chat_info = {
         "telegram_id": data.get("id"),
@@ -626,7 +626,7 @@ def procesar_export(
                 # (solo chat, nunca ingerido como media).
                 if media_type_tg == "sticker":
                     continue
-                if not os.path.isfile(os.path.normpath(os.path.join(export_path, file_rel))):
+                if not os.path.isfile(os.path.abspath(os.path.join(export_path, file_rel))):
                     continue
                 # Obtener datos del mensaje original para el ingest
                 msg_data = conn.execute(
@@ -795,7 +795,7 @@ def main(argv: list[str] | None = None):
     )
 
     # Validar export path
-    export_path = os.path.normpath(args.export_path)
+    export_path = os.path.abspath(args.export_path)
     json_path = os.path.join(export_path, JSON_FILENAME)
     if not os.path.isdir(export_path):
         log.error("El directorio no existe: %s", export_path)
@@ -836,7 +836,7 @@ def main(argv: list[str] | None = None):
         log.info("── DRY RUN ──")
 
     if args.destino:
-        args.destino = os.path.normpath(args.destino)
+        args.destino = os.path.abspath(args.destino)
         os.makedirs(os.path.join(args.destino, "telegram"), exist_ok=True)
 
     stats = procesar_export(

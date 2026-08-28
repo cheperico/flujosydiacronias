@@ -7,6 +7,16 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 47] — 2026-08-26
+
+### Corregido
+- **Auto-scroll de los textos en TD** (`scripts/td/puente_td.py` → `_PLANTILLA_TEXTOS_HTML`, HTML `td/textos_fluir.html`): el scroll se repetía "varias veces en la duración del texto" (baja → sube → repite) porque `tick()` usaba un bucle `% slotMs` infinito y anclaba el reloj a `idx * ROTACION_SEG` (índice del texto en la lista), que **no** es el slot temporal real — en preview `idx` era enorme (epoch) y el texto nunca se movía; en loop avanzado aparecía directo al final.
+  - **Comportamiento nuevo**: un texto que no entra en pantalla se lee **una sola vez** con un único descenso por slot de 30 s: **5 s** de pausa arriba (se ve el comienzo) → **23 s** de descenso continuo (easeInOutSine) → **2 s** de pausa al final → rota al siguiente texto. **Sin vuelta al comienzo** (es un texto que se lee, no un loop visual).
+  - **Fix técnico**: el reloj del descenso se ancla al **offset dentro del slot actual** (`relojSlot = t0 si ?t0, o la carga en preview`; `t = (Date.now() - relojSlot) % SLOT_MS`), el mismo reloj que usa `indiceActual()`; al completar el slot, `cancelarAnim()` (sin bucle infinito). `iniciarScroll(tarjeta)` ya no recibe `idx`.
+  - Textos que caben: centrados, sin scroll (sin cambios).
+
+---
+
 ## [Entrega 46] — 2026-08-26
 
 ### Cambiado
