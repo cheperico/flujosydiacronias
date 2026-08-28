@@ -1901,6 +1901,7 @@ def opcion_visualizaciones(db_path: str | None = None):
         "1": ("Mapas", opcion_mapas),
         "2": ("Exportar visualización web (deploy)", opcion_exportar_visualizacion),
         "3": ("TouchDesigner (puente OSC)", opcion_touchdesigner),
+        "4": ("Galerías de keypoints (HTML)", opcion_galerias_keypoints),
     }, db_path)
 
 
@@ -2186,6 +2187,52 @@ def opcion_mapas_municipio(db_path: str | None = None):
     mapas_municipio.main(args)
 
     pausa()
+
+
+# ── Galerías de keypoints ───────────────────────────────────────────────────
+
+def _ejecutar_galeria_keypoints(tipo: str, db_path: str | None = None):
+    """Genera una galería HTML de keypoints (transcripción o contexto) con N al azar."""
+    limpiar_pantalla()
+    titulo = "transcripción" if tipo == "transcripcion" else "contexto"
+    print(f"=== GALERÍA DE KEYPOINTS — {titulo.upper()} ===\n")
+    print("  Genera un HTML con N keypoints al azar; click → reproducción")
+    print("  del audio/video, mapa con la localización y slideshow de las")
+    print("  10 fotos más cercanas (distancia geográfica, fallback temporal).\n")
+    try:
+        n_str = input("  Cantidad de keypoints al azar [50]: ").strip() or "50"
+        n = int(n_str)
+        if n <= 0:
+            raise ValueError
+    except ValueError:
+        print("  Cantidad inválida.")
+        pausa()
+        return
+    default_out = f"pruebas/keypoints_{tipo}.html"
+    output = input(f"  Archivo de salida [{default_out}]: ").strip() or default_out
+    custom_db = input(f"  ?Usar otra DB? (default: {leer_db(db_path)}) [Enter para default]: ").strip()
+    print(f"\n  Resumen: tipo={tipo}  n={n}  output={output}")
+    if not _preguntar_sn("Generar galería"):
+        print("  Cancelado.")
+        pausa()
+        return
+    print("\n  Generando galería...\n")
+    from scripts import generar_galeria_keypoints
+    args = ["--tipo", tipo, "--n", str(n), "--output", output]
+    if custom_db:
+        args.extend(["--db", custom_db])
+    elif db_path:
+        args.extend(["--db", db_path])
+    generar_galeria_keypoints.main(args)
+    pausa()
+
+
+def opcion_galerias_keypoints(db_path: str | None = None):
+    """Menu: galerías HTML de keypoints al azar."""
+    _menu("GALERÍAS DE KEYPOINTS", {
+        "1": ("Keypoints de transcripción (50 al azar)", lambda db: _ejecutar_galeria_keypoints("transcripcion", db)),
+        "2": ("Keypoints de contexto (50 al azar)", lambda db: _ejecutar_galeria_keypoints("contexto", db)),
+    }, db_path)
 
 
 # ── Backfill end_time ─────────────────────────────────────────────────────────

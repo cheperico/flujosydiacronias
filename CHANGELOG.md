@@ -9,6 +9,9 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ## [Entrega 49] — 2026-08-28 — Revisión pre-presentación completa
 
+### Añadido
+- **Galerías de keypoints en TUI** (`scripts/generar_galeria_keypoints.py` + `flujos.py:opcion_galerias_keypoints`): nueva opción **Visualizaciones→4** con submenú `1 transcripción / 2 contexto` (50 al azar, player + mapa Leaflet online + slideshow 10 fotos con fundido 3s loop infinito). HTML en `pruebas/keypoints_*.html`.
+
 ### Corregido
 - **Race en fluir vivo** (`scripts/td/puente_td.py:1328`): `selecciones`/`ultimo_mensaje` sin `Lock` entre thread `ThreadingOSCUDPServer` y loop principal → selecciones perdidas/duplicadas. Ahora `lock_selecciones` + snapshot bajo lock.
 - **Nube tags GUI vs TD** (`gui_fluir.py:105`): solo `ia_keywords` → ahora 5 claves (`ia_keywords`, `ia_keywords_transcripcion/texto/sonido/video`) igual que `elecciones.py:108`.

@@ -238,6 +238,10 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
       │   └─ 2. Modo instalación: escucha continua (Enter para detener)
       ├─ 3. Probar OSC (eco)
       └─ 0. Volver
+  └─ 4. Galerías de keypoints (HTML)
+      ├─ 1. Keypoints de transcripción (50 al azar)
+      └─ 2. Keypoints de contexto (50 al azar)
+          └─ 0. Volver
 
 9. Ayuda
 ```
