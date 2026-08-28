@@ -1889,6 +1889,7 @@ def tui():
         "4": ("Consultar base de datos", lambda db: opcion_consultar(db)),
         "5": ("Mantenimiento DB", lambda db: opcion_mantenimiento(db)),
         "6": ("Visualizaciones", lambda db: opcion_visualizaciones(db)),
+        "7": ("Scripts temporarios (correcciones puntuales)", lambda db: opcion_scripts_temporarios(db)),
         "9": ("Ayuda", lambda db: opcion_ayuda()),
     }, db_path=leer_db(), pre_titulo=_cabecera, etiqueta_salir="Salir", on_salir=_chau)
 
@@ -2245,6 +2246,37 @@ def opcion_galerias_keypoints(db_path: str | None = None):
         "  mismas galerías en deploy/keypoints/*/ (PHP + RANDOM por carga,\n"
         "  player via servir_medio.php, fotos lazy). Reexportar deploy tras\n"
         "  tocar keypoints para actualizar visualizacion.db."
+    ))
+
+
+def opcion_scripts_temporarios(db_path: str | None = None):
+    """Menu temporario: correcciones puntuales no estabilizadas."""
+    def _corregir_360(db):
+        db = db or leer_db()
+        print("\n  Corregir timestamps 360 (CreateDate UTC→ART)")
+        print("  Lee QuickTime:CreateDate del archivo; recalcula timestamp_utc/original.")
+        print("")
+        modo = _preguntar_modo(db)
+        if modo is None:
+            print("  Cancelado.")
+            pausa()
+            return
+        dry = _preguntar_sn("Solo previsualizar (dry-run)")
+        reubicar = _preguntar_sn("Re-ubicar contra GPX tras corregir (--reubicar)")
+        from scripts import corregir_timestamp_360
+        args = ["--db", db, "--mode", modo]
+        if dry:
+            args.append("--dry-run")
+        if reubicar:
+            args.append("--reubicar")
+        corregir_timestamp_360.main(args)
+        pausa()
+
+    _menu("SCRIPTS TEMPORARIOS", {
+        "1": ("Corregir timestamps 360 (CreateDate UTC→ART)", _corregir_360),
+    }, db_path, intro=(
+        "  Correcciones puntuales, no parte del pipeline estable.\n"
+        "  Quitar al estabilizar ingesta (ver docs/correccion_timestamp_360.md)."
     ))
 
 
@@ -2726,6 +2758,10 @@ def main():
     elif comando in ("ingest-gpx", "gpx"):
         from scripts import ingest_gpx
         ingest_gpx.main(resto)
+
+    elif comando in ("corregir-360", "corregir360"):
+        from scripts import corregir_timestamp_360
+        corregir_timestamp_360.main(resto)
 
     else:
         print(f"Comando desconocido: {comando}")

@@ -58,7 +58,8 @@ referenciados en **Dónde está la información** (al final) — consultar bajo 
 │   │   keypoints_contexto.py, detectar_contenedores.py,
 │   │   repetir_contenido.py, audio_frame_crossref.py, exportar_visualizacion.py,
 │   │   limpiar_descripciones.py, limpiar_stickers.py, inferir_hora_textos.py,
-│   │   diagnosticar_camaras_360.py, ubicar_videos_gpx.py
+│   │   diagnosticar_camaras_360.py, ubicar_videos_gpx.py,
+│   │   corregir_timestamp_360.py
 │   ├── check_db.py, check_gps.py, check_db_data.py, test_gradiente.py
 │   ├── ai_media/
 │   │   ├── ollama_client.py, image_analysis.py, transcribe.py, transcribe_media.py,
@@ -363,6 +364,7 @@ Se consulta bajo demanda según la necesidad:
 | Videos 360° en web | `docs/videos_360_web.md` | Opciones de renderer 360° (Three.js, A-Frame...), requisitos de pipeline |
 | Rediseño de embeddings | `docs/embeddings_rediseno.md` | Dirección de diseño de la capa semántica (desactivada) |
 | Relojes de cámaras Insta360 desincronizados (videos 360° del viaje) | `docs/discrepancia_horarios_camaras.md` | Identificación de cámara (A=LA +7h / B=UTC+1 −1h / B reconfigurada), cómo deducir la hora real (embebido=UTC−3h), procedimiento reutilizable para videos nuevos |
+| Corrección de timestamps 360 post-ingesta | `docs/correccion_timestamp_360.md` | Script temporario `scripts/corregir_timestamp_360.py` (CreateDate UTC→ART, `--dry-run`/`--reubicar`); TUI `7) Scripts temporarios` y CLI `flujos.py corregir-360` |
 | Geocodificación / por qué localidad es NULL | `docs/geocodificacion_reversa.md` | Estrategias y alternativas |
 | Documentos de diseño | `docs/` (arquitectura_motor, flujo_de_medios, linea_de_tiempo, semantica_color, calculo_astronomico, visualizaciones, limpieza_tandas_resultados, ideas_externas, lecciones_elecciones_td, inferencia_autor, armado_de_tandas, plan_keywords, gui_fluir, videos_360_web, discrepancia_horarios_camaras, embeddings_rediseno) | Entender el "por qué" del diseño |
 | Calidad de keywords | `docs/plan_keywords.md` | Plan de keywords (5 exactas, refinar v2, sonido/video, nube unificada) |
