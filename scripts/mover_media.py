@@ -42,8 +42,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("mover_media")
 
-# Extensiones de sidecar conocidas
-SIDECAR_EXTS = [".AAE", ".json", ".xml", ".XMP"]
+# Extensiones de sidecar conocidas (case-insensitive)
+SIDECAR_EXTS = [".AAE", ".aae", ".json", ".xml", ".XMP", ".xmp"]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -223,13 +223,16 @@ def ejecutar_movimiento(conn, old_root: str, new_root: str) -> dict:
         # Actualizar DB con la ruta final (puede diferir de nueva_abs si hubo colisión)
         ruta_final_db = destino_final
         rel_final_db = calcular_nuevo_relativo(ruta_final_db, new_norm)
+        carpeta_final = os.path.basename(os.path.dirname(ruta_final_db))
+        if os.path.dirname(ruta_final_db) == new_norm:
+            carpeta_final = None
         conn.execute(
             """
             UPDATE media
             SET filepath_absoluto = ?, filepath_relativo = ?, carpeta = ?, updated_at = datetime('now')
             WHERE id = ?
             """,
-            (ruta_final_db, rel_final_db, os.path.dirname(ruta_final_db), mid),
+            (ruta_final_db, rel_final_db, carpeta_final, mid),
         )
 
         # Actualizar sidecar_xml en DB (relativo al nuevo root)
@@ -338,13 +341,16 @@ def ejecutar_copia(
         if update_db:
             ruta_final_db = destino_final
             rel_final_db = calcular_nuevo_relativo(ruta_final_db, new_norm)
+            carpeta_final = os.path.basename(os.path.dirname(ruta_final_db))
+            if os.path.dirname(ruta_final_db) == new_norm:
+                carpeta_final = None
             conn.execute(
                 """
                 UPDATE media
                 SET filepath_absoluto = ?, filepath_relativo = ?, carpeta = ?, updated_at = datetime('now')
                 WHERE id = ?
                 """,
-                (ruta_final_db, rel_final_db, os.path.dirname(ruta_final_db), mid),
+                (ruta_final_db, rel_final_db, carpeta_final, mid),
             )
 
             # Actualizar sidecar_xml en DB

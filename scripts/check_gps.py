@@ -94,17 +94,9 @@ def main(argv=None):
     parser.add_argument("--exiftool", default=None, help="Ruta a ExifTool")
     parser.add_argument("--samples", type=int, default=5,
                         help="Cantidad de muestras aleatorias (default: 5)")
+    parser.add_argument("--folder", default=None,
+                        help="Carpeta a inspeccionar directamente (usa check_gps_folder)")
     args = parser.parse_args(argv)
-
-    # DB path
-    if args.db:
-        db_path = os.path.abspath(args.db)
-    else:
-        db_path = os.path.join(os.path.dirname(__file__), "..", "db", "flujos.db")
-
-    if not os.path.isfile(db_path):
-        print(f"Error: no se encuentra la DB en {db_path}")
-        sys.exit(1)
 
     # ExifTool
     exiftool = args.exiftool or find_exiftool()
@@ -112,6 +104,29 @@ def main(argv=None):
         print("Advertencia: ExifTool no encontrado. Solo se mostrarán rutas.")
     else:
         print(f"ExifTool: {exiftool}")
+
+    # Modo carpeta directo
+    if args.folder:
+        if not os.path.isdir(args.folder):
+            print(f"Error: carpeta no existe: {args.folder}")
+            sys.exit(1)
+        print(f"Carpeta:  {args.folder}")
+        check_gps_folder(args.folder, exiftool or "exiftool", args.samples)
+        return
+
+    # DB path
+    if args.db:
+        db_path = os.path.abspath(args.db)
+    else:
+        try:
+            from db.util import resolver_db
+            db_path = resolver_db(None)
+        except Exception:
+            db_path = os.path.join(os.path.dirname(__file__), "..", "db", "flujos.db")
+
+    if not os.path.isfile(db_path):
+        print(f"Error: no se encuentra la DB en {db_path}")
+        sys.exit(1)
 
     print(f"DB:       {db_path}")
 

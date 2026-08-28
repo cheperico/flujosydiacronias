@@ -32,9 +32,15 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+if ollama is None:
+    logger.warning("Módulo 'ollama' no instalado. Instalar con: pip install ollama")
 
 # Modelos de visión disponibles en el sistema
 MODELOS_VISION = [
@@ -185,6 +191,8 @@ class OllamaVision:
                 (128000 → 8.2 GB RAM). 4096 cubre imagen 1600px + prompt
                 con margen, usando ~2.9 GB.
         """
+        if ollama is None:
+            raise ImportError("Módulo 'ollama' no instalado. Instalar con: pip install ollama")
         # Asegurar que el servidor Ollama esté corriendo antes de consultarlo
         if not asegurar_ollama():
             logger.error(

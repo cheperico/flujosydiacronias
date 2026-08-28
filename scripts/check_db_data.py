@@ -8,7 +8,17 @@ if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "db", "flujos.db")
+import argparse
+
+parser = argparse.ArgumentParser(description="Check weather and geolocation data in the database.")
+parser.add_argument("--db", default=None, help="Ruta a la DB (default: db/flujos.db)")
+args = parser.parse_args()
+
+try:
+    from db.util import resolver_db
+    db_path = resolver_db(args.db)
+except Exception:
+    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "db", "flujos.db")
 
 if not os.path.isfile(db_path):
     print(f"DB no encontrada: {db_path}")

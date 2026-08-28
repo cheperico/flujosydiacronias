@@ -74,8 +74,12 @@ log = logging.getLogger("ingest")
 
 def fast_fingerprint(filepath: str) -> str:
     """
-    Fingerprint rápido: tamaño + fecha de modificación.
-    Es instantáneo y suficientemente único para detectar archivos duplicados.
+    Fingerprint rápido: "{size}-{mtime}" — instantáneo pero NO es un hash
+    criptográfico. Puede colisionar si el archivo cambia dentro del mismo
+    segundo y mantiene el tamaño, o dos archivos distintos coinciden en
+    size+mtime. Para deduplicación estricta usar --full-hash (SHA-256 real).
+    Se guarda en media.file_hash (UNIQUE); formatos mezclados con SHA-256 son
+    opacos para el resto del pipeline.
     """
     size = os.path.getsize(filepath)
     mtime = os.path.getmtime(filepath)
@@ -699,10 +703,8 @@ def init_db(db_path: str):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
 
-    # Primero migraciones: agregar columnas que puedan faltar (schema evolutivo)
-    # Esto debe ejecutarse ANTES de los CREATE INDEX que referencian esas columnas
-    migrate_db(conn)
-
+    # Primero schema canónico (crea tablas), luego migraciones para DBs viejas.
+    # El orden anterior (migrate antes de schema) enmascaraba errores en DB fresca.
     if schema_path:
         with open(schema_path, "r", encoding="utf-8") as f:
             conn.executescript(f.read())
@@ -766,6 +768,9 @@ def init_db(db_path: str):
             CREATE INDEX IF NOT EXISTS idx_media_ingest_batch ON media(ingest_batch_id);
             CREATE INDEX IF NOT EXISTS idx_metadata_key ON media_metadata(key);
         """)
+
+    # Migraciones para DBs creadas con schema anterior (columnas evolutivas)
+    migrate_db(conn)
 
     conn.commit()
     return conn

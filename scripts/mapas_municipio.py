@@ -364,12 +364,30 @@ def _agregar_marcadores_basicos(mapa, puntos: list[dict], umbral_gap_aviso: floa
 
 
 def _variante_ruta(puntos: list[dict], tramo_track: list[tuple] | None = None,
+                   track_completo: list[tuple] | None = None,
                    umbral_gap_aviso: float = 1800) -> folium.Map:
-    """Puntos del municipio + tramo del track GPX que los conecta (si hay)."""
+    """Puntos del municipio + tramo del track resaltado sobre el track completo.
+
+    El encuadre (bounds) se mantiene en el municipio, pero se dibuja el track
+    completo de fondo (gris tenue) para dar contexto de dónde está el tramo
+    dentro del viaje.
+    """
     lats = [p["lat"] for p in puntos]
     lons = [p["lon"] for p in puntos]
     m = _crear_mapa_base(lats, lons)
 
+    # Fondo: track completo en gris tenue (contexto)
+    if track_completo and len(track_completo) >= 2:
+        coords_completo = [(p[1], p[2]) for p in track_completo]
+        folium.PolyLine(
+            locations=coords_completo,
+            color=CONTEXTO_COLOR,
+            weight=CONTEXTO_WEIGHT,
+            opacity=CONTEXTO_OPACITY,
+            tooltip=f"Track completo — {len(track_completo)} puntos",
+        ).add_to(m)
+
+    # Tramo del municipio resaltado
     if tramo_track and len(tramo_track) >= 2:
         coords = [(p[1], p[2]) for p in tramo_track]
         folium.PolyLine(
@@ -377,9 +395,9 @@ def _variante_ruta(puntos: list[dict], tramo_track: list[tuple] | None = None,
             color=RUTA_COLOR,
             weight=4,
             opacity=0.8,
-            tooltip=f"Track — {len(tramo_track)} puntos",
+            tooltip=f"Tramo — {len(tramo_track)} puntos",
         ).add_to(m)
-    elif len(puntos) >= 2:
+    elif len(puntos) >= 2 and not (track_completo and len(track_completo) >= 2):
         # Fallback sin track: línea entre los GPS de los medios
         coords = [(p["lat"], p["lon"]) for p in puntos]
         folium.PolyLine(
@@ -507,7 +525,7 @@ def _variante_gradiente(puntos: list[dict], tramo_track: list[tuple] | None = No
 
 # Generadores por variante (reciben puntos, tramo del track, track completo y umbral gap)
 _GENERADORES = {
-    "ruta": lambda puntos, tramo, completo, umbral: _variante_ruta(puntos, tramo, umbral),
+    "ruta": lambda puntos, tramo, completo, umbral: _variante_ruta(puntos, tramo, completo, umbral),
     "puntos": lambda puntos, tramo, completo, umbral: _variante_puntos(puntos, umbral),
     "contexto": lambda puntos, tramo, completo, umbral: _variante_contexto(puntos, completo, umbral),
     "gradiente": lambda puntos, tramo, completo, umbral: _variante_gradiente(puntos, tramo, umbral),

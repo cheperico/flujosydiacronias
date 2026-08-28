@@ -185,6 +185,12 @@ def _migrar_media_tg_message_id(conn: sqlite3.Connection):
     """
     Migración v4: agrega columna telegram_message_id a media si no existe.
     """
+    # Si la tabla media no existe aún (DB vacía en tests), no hacer nada;
+    # será creada por schema.sql / init_db con la columna ya incluida.
+    if not conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='media'"
+    ).fetchone():
+        return
     cur = conn.execute("PRAGMA table_info(media)")
     cols = {row[1] for row in cur.fetchall()}
     if "telegram_message_id" not in cols:

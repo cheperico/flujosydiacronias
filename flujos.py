@@ -132,6 +132,9 @@ COMANDOS:
   ingest-textos    Ingerir textos .md de la carpeta textos/ como medios type='text'.
                    Ej: python flujos.py ingest-textos
 
+  ingest-gpx       Ingerir un archivo GPX (tracks/waypoints + backfill altitud).
+                   Ej: python flujos.py ingest-gpx --gpx tracks/ruta.gpx
+
   mover            Mover o copiar archivos a nueva ubicacion y actualizar DB.
                    Ej: python flujos.py mover --new-root NUEVA_RAIZ --mode mover
 
@@ -2659,6 +2662,10 @@ def main():
     elif comando in ("ingest-textos", "textos"):
         from scripts import ingest_textos
         ingest_textos.main(resto)
+
+    elif comando in ("ingest-gpx", "gpx"):
+        from scripts import ingest_gpx
+        ingest_gpx.main(resto)
 
     else:
         print(f"Comando desconocido: {comando}")

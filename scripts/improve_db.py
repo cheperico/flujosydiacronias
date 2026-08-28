@@ -121,14 +121,14 @@ def check_descriptions(conn) -> dict:
 
 
 def check_combinado(conn) -> dict:
-    """Cuenta imágenes sin keywords Y descripción combinadas (ia_keywords ES)."""
+    """Cuenta imágenes sin keywords Y descripción combinadas (ES finales)."""
     total = conn.execute("SELECT COUNT(*) FROM media WHERE type='image'").fetchone()[0]
     pendientes = conn.execute("""
         SELECT COUNT(*) FROM media m
         WHERE m.type='image'
-          AND NOT EXISTS (
-              SELECT 1 FROM media_metadata mm
-              WHERE mm.media_id = m.id AND mm.key = 'ia_keywords'
+          AND (
+                NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id = m.id AND mm.key = 'ia_keywords')
+             OR NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id = m.id AND mm.key = 'ia_description')
           )
     """).fetchone()[0]
     return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
@@ -723,9 +723,9 @@ def run_combinado(conn, db_path, mode, stats, motor="google"):
         query = f"""
             SELECT m.id, m.filepath_absoluto FROM media m
             WHERE m.type='image'
-              AND NOT EXISTS (
-                  SELECT 1 FROM media_metadata mm
-                  WHERE mm.media_id = m.id AND mm.key IN ('{CLAVE_KW_EN}', '{CLAVE_DESC_EN}')
+              AND (
+                    NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id = m.id AND mm.key = '{CLAVE_KW_EN}')
+                 OR NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id = m.id AND mm.key = '{CLAVE_DESC_EN}')
               )
         """
     else:

@@ -140,8 +140,16 @@ def agrupar_por_embeddings(
         Lista de sub-grupos.
     """
     from scripts.ai_media.ollama_client import OllamaVision
-    from ollama import embeddings
-    import numpy as np
+    try:
+        from ollama import embeddings
+    except ImportError:
+        logger.error("Módulo 'ollama' no instalado. Instalar con: pip install ollama")
+        return [grupo]
+    try:
+        import numpy as np
+    except ImportError:
+        logger.error("Módulo 'numpy' no instalado. Instalar con: pip install numpy")
+        return [grupo]
 
     if len(grupo) <= 1:
         return [grupo]
@@ -168,7 +176,16 @@ def agrupar_por_embeddings(
         if desc:
             try:
                 resp = embeddings(model=modelo_embed, prompt=desc)
-                emb_por_ruta[ruta] = np.array(resp["embedding"], dtype=np.float32)
+                # Compat: ollama<0.3 devuelve dict, >=0.3 devuelve objeto
+                if isinstance(resp, dict):
+                    vec = resp.get("embedding")
+                else:
+                    vec = getattr(resp, "embedding", None)
+                    if vec is None and isinstance(resp, dict):
+                        vec = resp.get("embedding")
+                if vec is None:
+                    raise ValueError("Respuesta embeddings sin campo 'embedding'")
+                emb_por_ruta[ruta] = np.array(vec, dtype=np.float32)
             except Exception as e:
                 logger.warning("Error generando embedding para %s: %s", ruta, e)
 

@@ -165,12 +165,13 @@ class ModoHelper:
         return base
 
     def update_flag_cols(self, conn: sqlite3.Connection, table: str,
-                          flag_cols: list[str], extra_where: str = "1=1") -> None:
+                           flag_cols: list[str], extra_where: str = "1=1") -> None:
         """
         En modo update/replace, marca columnas como NULL para reprocesar.
         En modo replace esto es adicional al clean().
 
         Sirve cuando update debe reprocesar pero no borrar filas enteras.
+        Nota: actualmente sin uso directo (helper disponible para scripts futuros).
         """
         if self.mode in ("update", "replace"):
             sets = ", ".join(f"{c} = NULL" for c in flag_cols)

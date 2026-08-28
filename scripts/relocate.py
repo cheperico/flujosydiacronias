@@ -111,11 +111,11 @@ def apply_changes(conn, old_root: str, new_root: str):
     conn.execute(
         """
         UPDATE media
-        SET filepath_absoluto = REPLACE(filepath_absoluto, ?, ?),
+        SET filepath_absoluto = ? || substr(filepath_absoluto, length(?) + 1),
             updated_at = datetime('now')
         WHERE filepath_absoluto LIKE ? || '%'
         """,
-        (old_norm, new_norm, old_norm),
+        (new_norm, old_norm, old_norm),
     )
     cambios = conn.rowcount
 

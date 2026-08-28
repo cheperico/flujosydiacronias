@@ -117,7 +117,8 @@ def calcular_gradientes(conn: sqlite3.Connection, dry_run: bool = False,
         conn: Conexión SQLite a la base de datos.
         dry_run: Si True, solo calcula y muestra, no escribe en DB.
         verbose: Si True, muestra cada punto procesado.
-        mode: skip/update → procesa todos (idéntico); replace → limpia primero.
+        mode: skip/update → procesa todos (idéntico, intencional: el gradiente
+            es determinista y barato de recalcular); replace → limpia primero.
 
     Returns:
         Dict con estadísticas del proceso.

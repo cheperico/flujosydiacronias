@@ -266,3 +266,120 @@ ubicacion: -29.501575860326636, -63.695630190309565
 
 La tierra hacíase cada vez más árida, los únicos animales que parecen subsistir en algunas zonas de este semi desierto son las cabras. Las pocas habitaciones que se encuentran están bastante alejadas entre sí y esto se aplica a las personas que viven en ellas. Mis bravos caballos manteníanse como héroes a pesar de no haber comido casi en varios días y de la falta de agua.
 Ernesto "Che" Guevara, “Diario de un viaje en bicimoto por las provincias argentinas” (el texto, escrito en 1950, fue publicado por Ernesto Guevara Lynch en el libro Mi hijo el Che)
+
+## Saliendo de Villa Ojo de Agua
+autor: Ernesto "Che" Guevara
+fecha: 
+tags:
+ubicacion: -28.96734383945029, -63.97304867997441
+
+Después de haber dormido unas 8 horas y previa una buena alimentación emprendí mi viaje hacia las famosas Salinas Grandes, el Sahara argentino. Las unánimes declaraciones de mis oficiosos informantes afirmaban que con el medio litro de agua que llevaba me sería imposible cruzar las Salinas, pero la mezcla bien batida de irlandés y gallego que corre por mis venas hizo que me empeñara en esa cantidad y con ella partí (...) A los costados del camino se levantan enormes cactus de los 6 metros, que parecen enormes candelabros verdes. La vegetación es abundante y se ven señales de fertilidad, pero poco a poco el panorama va variando (…) el sol cae a plomo sobre mi cabeza y rebotando contra el suelo me envuelve en una ola de calor. Elijo una frondosa sombra de un algarrobo, y me tiro durante una hora a dormir; luego me levanto, tomo unos mates y sigo viaje. Sobre el camino el mojón del kilómetro 1000 de la ruta 9 me da un saludo de bienvenida.
+Ernesto "Che" Guevara, Diario de un viaje en bicimoto por las provincias argentinas (el texto, escrito en 1950, fue publicado por Ernesto Guevara Lynch en el libro Mi hijo El Che)
+
+## Ruta 9 kilómetro 1006
+autor: Facundo Sinatra
+fecha: 
+tags:
+ubicacion: -28.87587683714721, -63.97192451125408
+
+Aquel algarrobo fue testigo del descanso del otrora revolucionario, quien dejó al mismo tiempo en su cuaderno marcado una referencia puntual sobre la ruta 9. En este sentido el docente e historiador santiagueño René Galván relata: “En cercanías al kilómetro 1000, más específicamente en el kilómetro 1006, se levanta un monolito en medio de las Salinas, realizado para homenajear a víctimas de un fatal accidente de tránsito ocurrido en 1941”, situación que invita a pensar que Guevara vio aquella señalización y, al llamarle la atención, luego la destacó en su bitácora.
+Facundo Sinatra, “La primera entrevista al Che Guevara” (2010)
+
+## Santiago del Estero I
+autor: CuChullaine OReilly
+fecha: 
+tags:
+ubicacion: -27.78621929183424, -64.26258587686866
+
+Marchando hacia el norte, el trío avanzó a través de agujeros de barro, de pantanos de arena movediza y de ríos (...) El paisaje se volvió árido, desolado. Nubes espesas y blancas de polvo de arena fina cubrían la tierra y les impedían respirar, pero no lograron hacerles aminorar la progresión regular de la marcha. Cuando la caravana arribó a la ciudad de Santiago del Estero, el rostro de Tschiffely estaba quemado, con los labios agrietados y ensangrentados. Los mapas con los que contaba solo le aportaban una ayudita cotidiana, mostrándole únicamente las generalidades de la topografía. Además, resultaba estéril preguntar la dirección a seguir a lo) s pobladores del lugar. “Inútil preguntar acerca del camino a esas personas, pues ellos no tienen más que una respuesta, siempre la misma, “siga derecho nomás”, sin considerar que el sendero da mil vueltas a través de un verdadero laberinto de valles y de cañones. Si uno pregunta acerca de la distancia que lo separa de la localidad siguiente, siempre se recibe la misma respuesta monótona e irritante “aquí a la vuelta no más” o “cerquita” aunque hubiera más de diez caracoles y de valles laterales, y que fuera probablemente necesario permanecer a caballos durante toda una jornada, con tal de no perderse.” A pesar de esas respuestas inútiles no dejaba de preguntar el camino a cuanta persona pasara, aunque mas no fuera para romper la monotonía de las horas de soledad en las que no oía ninguna voz humana.
+CuChullaine OReilly, “Tschiffely, Gato y Mancha, héroes de la pampa” (2002)
+
+## Santiago del Estero II
+autor: Concolorcorvo
+fecha: 
+tags:
+ubicacion: -27.78621929183424, -64.26258587686866
+
+El río que pasa a orillas de esta ciudad, que tiene este nombre, es caudalosos y de él se hacen tres formidables lagunas en tierras de los Avipones, indios gentiles, y en cuyos contornos hay copiosas salinas. En la ciudad de Santiago del Estero estuvo hasta el año de 1690 la silla episcopal, que se trasladó a Córdoba de recelo de las inundaciones del río, que ya había llevado muchas casas. Todavía se mantiene en la plaza la Catedral, que sirve de parroquia (...) Los vecinos que llaman sobresalientes no llegan a veinte. Algunos invernan porciones de mulas para vender en Salta o conducir al Perú de su cuenta, y los demás, que están repartidos en chozas, son unos infelices, porque escasea algo la carne. El país es salitroso. Las mujeres trabajan excelentes alfombras y chuces, pero como tiene n poco expendio, por hacerse en todo el Tucumán, sólo se fabrican por encargo, y la mayor prueba de su pobreza y poco comercio es que las correspondencias de un año en toda la jurisdicción no pasan de treinta pesos. En la casa que fue de los regulares se pueden alojar cómodamente todos los habitantes de la ciudad de Santiago y su ejido, porque tiene tanta multitud de oficinas, patios y traspatios, que forman un laberinto.
+Concolorcorvo, El lazarillo de ciegos caminantes (1771)
+
+## Santiago del Estero III
+autor: Ernesto "Che" Guevara
+fecha: 
+tags:
+ubicacion: -27.78621929183424, -64.26258587686866
+
+Temprano emprendí el viaje (...) llegué a Santiago donde fui muy bien recibido por una familia amiga (…) Allí se me hizo el primer reportaje de mi vida, para un diario de Tucumán, y el autor fue un señor Santillán, que me conoció en la primera parada que hice en la ciudad.
+Ernesto "Che" Guevara, Diario de un viaje en bicimoto por las provincias argentinas (el texto, escrito en 1950, fue publicado por Ernesto Guevara Lynch en el libro Mi hijo El Che)
+
+## Saliendo de Termas de Río Hondo
+autor: Concolorcorvo
+fecha: 
+tags:
+ubicacion: -27.382538691246193, -64.94981674173374
+
+A la salida de Vinará, que dista veinte leguas de Santiago, da principio la jurisdicción de San Miguel de Tucumán, con monte más desahogado, árboles elevados y buenos pastos, y ya se empieza a ver el árbol nombrado quebracho, dicho así para significar su dureza, por romper las hachas con que se pule. Por la superficie es blanco y suave al corte. En el centro es colorado y sirve para columnas y otros muchos ministerios. Dicen que es incorruptible, pero yo he visto algunas columnas carcomidas. Después de labrado, o quitado todo el blanco, se echa en el agua, en donde se pone ta duro y pesado como la piedra más maciza.
+Concolorcorvo, El lazarillo de ciegos caminantes (1771)
+
+## Ingresando a la provincia de Tucumán I
+autor: Juan Bautista Alberdi
+fecha: 
+tags:
+ubicacion: -27.30926755908618, -64.99093039975214
+
+Por donde quiera que se venga a Tucumán, el extranjero sabe cuando ha pisado su territorio sin que nadie se lo diga. El cielo, el aire, la tierra, las plantas, todo es nuevo y diferente de lo que se ha acabado de ver.
+Juan Bautista Alberdi, Memoria descriptiva de Tucumán (1834)
+
+## Ingresando a la provincia de Tucumán II
+autor: Carlos Christiernsson
+fecha: 
+tags:
+ubicacion: -27.28145737601037, -65.01885915768358
+
+Cuando llegamos a la provincia de Tucumán cambió como por encanto el aspecto del terreno y cesaron nuestras fatigas. Campiñas risueñas, poblaciones y pueblos a cada paso, agua y arroyos y ríos cada día, era la gloria para los hombres y bestias, y en poco tiempo estuvimos acampados en las orillas de esa ciudad industriosa, llamada con razón el jardín de la República. 
+Carlos Christiernsson, Recuerdos de 42 años en la República Argentina (El libro fue publicado en 1910, el fragmento refiere a un viaje de Buenos Aires a Tucumán que Christiernsson, ingeniero sueco de Ferrocarriles, realizó entre 1868 y 1870)
+
+## Ingresando a la provincia de Tucumán III
+autor: Aimé Tschiffely
+fecha: 
+tags:
+ubicacion: -27.186671321823162, -65.10523484285241
+
+Después de dos largas etapas llegamos a Tucumán, al pie de las primeras cadenas de los Andes, también llamado el Edén argentino (...) Estaba contento de haber llegado a los Andes, durante algunos días marchamos entre verdes plantaciones de caña de azúcar, me maravilló ver a los hombres en su trabajo. La mayoría de ellos son muy bebedores y aquí, a diferencia de todos los otros puntos de la Argentina, la ebriedad no es común sino general.
+Aimé Tschiffely, Mancha y Gato cuentan sus aventuras (publicado en 1945 el libro narra el viaje de Tschiffely y los caballos Gato y Mancha, que salieron de Buenos Aires en 1925 y llegaron a Nueva York tres años después)
+
+## Llegando a San Miguel de Tucumán
+autor: Ernesto "Che" Guevara
+fecha: 
+tags:
+ubicacion: -26.923110478450333, -65.14511349387209
+
+A las nueve de la mañana del día siguiente continué rumbo a Tucumán adonde llegué bien entrada la noche (...) En un lugar del camino me sucedió una cosa curiosa: mientras paraba a inflar una goma, a unos mil metros de un pueblo, apareció un linyera debajo de una alcantarilla cercana y naturalmente iniciamos una conversación. Este hombre venía de la cosecha de algodón en el Chaco y pensaba, luego de vagar un poco dirigirse a San Juan, a la vendimia. Enterado de mi plan de recorrer unas cuantas provincias y luego de saber que mi hazaña era puramente deportiva, se agarró la cabeza con aire desesperado: ‘Mama mía ¿toda esa fuerza se gasta inútilmente usted?’.
+Ernesto "Che" Guevara, Diario de un viaje en bicimoto por las provincias argentinas (el texto, escrito en 1950, fue publicado por Ernesto Guevara Lynch en el libro Mi hijo El Che)
+
+## Cruzando el río Sali (justo antes de entrar a San Miguel)
+autor: Concolorcorvo
+fecha: 
+tags:
+ubicacion: -26.862436041378672, -65.18769263855725
+
+Una legua antes de la ciudad de San Miguel se encuentra el río nombrado Sali. Sus aguas son más saladas que las del Tercero. Son cristalinas y en sus orillas se hacen unos pozos y por sus poros se introduce agua potable. También hay otros pocitos naturales en la ribera de muy buena agua, pero tapándose en tiempo de avenidas, son inútiles. Este río se forma de doce arroyos que tienen su nacimiento en los manantiales del interior de la jurisdicción y, de todos, el gran río de Santiago del Estero.
+Concolorcorvo, El lazarillo de ciegos caminantes (1771)
+
+## San Miguel de Tucumán I
+autor: Concolorcorvo
+fecha: 
+tags:
+ubicacion: -26.813350150459446, -65.21786045745
+
+Ciudad capital de esta jurisdicción y partenza hoy de correos, ocupa el mejor sitio de la provincia: alto, despejado y rodeado de fértiles campañas. A cinco cuadras perfectas está reducida esta ciudad, pero no está poblada a correspondencia. La parroquia, o matriz, está adornada como casa rural y los conventos de San Francisco y Santo Domingo mucho menos. Los principales vecinos, alcaldes y regidores, que por todo no pasarán de veinticuatro, son hombres circunspectos y tenaces en defender sus privilegios.
+Concolorcorvo, El lazarillo de ciegos caminantes (1771)
+
+## San Miguel de Tucumán II
+autor: Carlos Christiernsson
+fecha: 
+tags:
+ubicacion: -26.813350150459446, -65.21786045745
+
+Nosotros, que llevamos a esa culta sociedad la promesa de la llegada de los progresistas rieles, que todo lo transforman en beneficios de la civilización, fuimos tratados a cuerpo de rey y todos, desde el gobernador (...) hasta el propietario más humilde, nos brindaban mil atenciones.
+Carlos Christiernsson, Recuerdos de 42 años en la República Argentina (El libro fue publicado en 1910, el fragmento refiere a un viaje de Buenos Aires a Tucumán que Christiernsson, ingeniero sueco de Ferrocarriles, realizó entre 1868 y 1870)

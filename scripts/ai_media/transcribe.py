@@ -34,9 +34,15 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
-import faster_whisper
+try:
+    import faster_whisper
+except ImportError:
+    faster_whisper = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+if faster_whisper is None:
+    logger.warning("Módulo 'faster-whisper' no instalado. Instalar con: pip install faster-whisper")
 
 # Extensiones de audio que faster-whisper puede leer directamente
 EXT_AUDIO = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
@@ -216,6 +222,8 @@ def transcribir_audio(
         FileNotFoundError: Si no existe el archivo de entrada.
         RuntimeError: Si falla la transcripción o extracción de audio.
     """
+    if faster_whisper is None:
+        raise ImportError("faster-whisper no instalado. Instalar con: pip install faster-whisper")
     ruta = Path(ruta_audio)
     if not ruta.exists():
         raise FileNotFoundError(f"No se encuentra el archivo: {ruta_audio}")

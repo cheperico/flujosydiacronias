@@ -39,9 +39,12 @@ if __name__ == "__main__" and __package__ is None:
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from pythonosc import udp_client
-from pythonosc import osc_server
-from pythonosc import dispatcher
+try:
+    from pythonosc import udp_client
+    from pythonosc import osc_server
+    from pythonosc import dispatcher
+except ImportError:
+    udp_client = osc_server = dispatcher = None  # type: ignore
 
 from db.util import abrir, resolver_db
 # util_enter.py vive en scripts/td/ (misma carpeta que este script)
@@ -1327,6 +1330,7 @@ def modo_fluir(
     """
     selecciones: dict[str, list[str]] = {}
     ultimo_mensaje = time.monotonic()
+    lock_selecciones = threading.Lock()
 
     def al_recibir_seleccion(addr: str, *args: Any) -> None:
         """Acumula cada mensaje de la ráfaga en su grupo."""
@@ -1342,8 +1346,9 @@ def modo_fluir(
         if grupo != "horas" and grupo not in GRUPOS_OSC_A_FILTRO:
             log.warning("  Grupo OSC desconocido, se ignora: %r", grupo)
             return
-        ultimo_mensaje = time.monotonic()
-        selecciones.setdefault(grupo, []).extend(valores)
+        with lock_selecciones:
+            ultimo_mensaje = time.monotonic()
+            selecciones.setdefault(grupo, []).extend(valores)
         log.info("  Ráfaga %s → %s", grupo, ", ".join(valores))
 
     disp = dispatcher.Dispatcher()
@@ -1357,12 +1362,17 @@ def modo_fluir(
     detener = detener_con_enter()
     try:
         while not detener.is_set():
-            if selecciones and time.monotonic() - ultimo_mensaje >= debounce:
+            snapshot: dict[str, list[str]] | None = None
+            with lock_selecciones:
+                if selecciones and time.monotonic() - ultimo_mensaje >= debounce:
+                    snapshot = {k: list(v) for k, v in selecciones.items()}
+                    selecciones.clear()
+            if snapshot is not None:
                 log.info("  Ráfaga completa (%d selecciones). Generando loop...",
-                         sum(len(v) for v in selecciones.values()))
+                         sum(len(v) for v in snapshot.values()))
                 _procesar_rafaga(
                     db_path,
-                    selecciones,
+                    snapshot,
                     loop_secs,
                     spec_salida,
                     host,
@@ -1372,7 +1382,6 @@ def modo_fluir(
                     generar_chat_html=generar_chat_html,
                     generar_textos_html=generar_textos_html,
                 )
-                selecciones.clear()
                 if una_vez:
                     log.info("  --una-vez: saliendo tras la primera ráfaga.")
                     break

@@ -102,11 +102,19 @@ def obtener_datos_desde_db(db_path: str):
     colores = [(str(fila[0]), int(fila[1])) for fila in filas]
     colores = sorted(colores, key=lambda vf: _clave_alfabetica(vf[0]))
 
-    # --- Tags (ia_keywords): TOP 200 por frecuencia, luego alfabético ---
-    filas = conn.execute("""
-        SELECT value FROM media_metadata WHERE key='ia_keywords'
-        AND value IS NOT NULL AND value != ''
-    """).fetchall()
+    # --- Tags (5 fuentes, mismo universo que elecciones.py CLAVES_TAGS): TOP 200 por frecuencia, luego alfabético ---
+    CLAVES_TAGS = (
+        "ia_keywords",
+        "ia_keywords_transcripcion",
+        "ia_keywords_texto",
+        "ia_keywords_sonido",
+        "ia_keywords_video",
+    )
+    marcadores = ",".join("?" * len(CLAVES_TAGS))
+    filas = conn.execute(
+        f"SELECT value FROM media_metadata WHERE key IN ({marcadores}) AND value IS NOT NULL AND value != ''",
+        CLAVES_TAGS,
+    ).fetchall()
 
     contador: dict[str, int] = {}
     KEYWORDS_A_IGNORAR = [

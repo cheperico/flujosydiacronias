@@ -288,7 +288,7 @@ def incrustar_tiles_vista_inicial(
 
     El mapa debe haberse creado SIN capa base (folium.Map(tiles=None)); esta
     función agrega UNA capa custom que resuelve los tiles de la vista inicial
-    como data URIs (sin red) y delega el resto a CartoDB online. La capa se
+    como data URIs (sin red) y     delega el resto a Esri online. La capa se
     inyecta SIEMPRE (aunque `zooms=[]` o falle la descarga), así el mapa nunca
     queda sin tiles: con un dict vacío funciona en modo 100% online.
 

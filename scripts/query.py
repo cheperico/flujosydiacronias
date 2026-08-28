@@ -91,6 +91,9 @@ def list_columns(conn):
 def distinct_column(conn, col: str, count: bool, where: str | None):
     """Valores únicos de una columna de media."""
     if where:
+        if not _where_seguro(where):
+            print("Error: la condición --where contiene comandos SQL no permitidos.")
+            return
         where_clause = f"WHERE {where}"
     else:
         where_clause = ""
@@ -273,6 +276,10 @@ Ejemplos:
         if not _es_columna_valida(conn, args.distinct):
             print(f"Error: '{args.distinct}' no es una columna válida de la tabla media.")
             print("Usá --columns para ver las columnas disponibles.")
+            conn.close()
+            return
+        if args.where and not _where_seguro(args.where):
+            print("Error: la condición --where contiene comandos SQL no permitidos.")
             conn.close()
             return
         distinct_column(conn, args.distinct, args.count, args.where)

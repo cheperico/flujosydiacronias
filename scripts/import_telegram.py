@@ -176,8 +176,6 @@ def detectar_message_type(msg: dict) -> str:
     # Texto plano (último recurso)
     return "text"
 
-    return "other"
-
 
 def detectar_type_media(media_type: str, mime_type: str) -> str:
     """Mapea media_type/mime_type de Telegram a type de media table."""

@@ -7,6 +7,31 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 49] — 2026-08-28 — Revisión pre-presentación completa
+
+### Corregido
+- **Race en fluir vivo** (`scripts/td/puente_td.py:1328`): `selecciones`/`ultimo_mensaje` sin `Lock` entre thread `ThreadingOSCUDPServer` y loop principal → selecciones perdidas/duplicadas. Ahora `lock_selecciones` + snapshot bajo lock.
+- **Nube tags GUI vs TD** (`gui_fluir.py:105`): solo `ia_keywords` → ahora 5 claves (`ia_keywords`, `ia_keywords_transcripcion/texto/sonido/video`) igual que `elecciones.py:108`.
+- **Combinado skip** (`scripts/improve_db.py:123,722`): `NOT EXISTS IN (...)` dejaba a medio hacer → ahora `OR` con dos `NOT EXISTS` separados (check y query).
+- **Carpeta en mover** (`scripts/mover_media.py:232,347`): `dirname` guardaba path completo → ahora `basename(dirname)` + `None` si en root + `SIDECAR_EXTS` case-insensitive.
+- **Relocate prefijo** (`scripts/relocate.py:112`): `REPLACE` reemplazaba todas las ocurrencias → ahora `? || substr(..., length(?)+1)` solo prefijo.
+- **Migración v4** (`db/migrate.py:184`): `ALTER TABLE media` fallaba en DB vacía (`no such table`) → guard `sqlite_master`.
+- **Init DB orden** (`scripts/ingest.py:691`): `migrate_db` antes de `schema.sql` enmascaraba errores → ahora schema primero, luego migraciones.
+- **Query WHERE** (`scripts/query.py:91`): `distinct_column` sin validar `--where` → ahora `_where_seguro` también en `--distinct`.
+- **Clustering embeddings** (`scripts/ai_media/clustering.py:170`): `resp["embedding"]` fallaba con `ollama>=0.3` (objeto) → ahora maneja dict y objeto + guard `numpy`/`ollama`.
+- **Imports sin guard** (`ollama_client.py`, `transcribe.py`, `puente_td.py`): crash si falta dependencia → ahora `try/except ImportError` + mensaje `pip install`.
+
+### Cambiado
+- **Ingest fingerprint doc** (`scripts/ingest.py:75`): aclara que `fast_fingerprint` no es SHA y remite a `--full-hash`.
+- **Gradiente skip doc** (`scripts/gradiente.py:108`): documentado como intencional (determinista).
+- **Check DB** (`scripts/check_db.py`/`check_db_data.py`): usan `resolver_db` + `--db` y lista completa de tablas.
+- **Check GPS** (`scripts/check_gps.py`): expone `--folder` para `check_gps_folder` + `resolver_db`.
+- **Ingest GPX CLI** (`flujos.py`): nuevo `ingest-gpx` / `gpx` (antes solo TUI Ingesta→2).
+- **Tiles doc** (`scripts/tiles_offline.py:291`): CartoDB → Esri.
+
+### Verificado
+- `db/test_migrate` 8/8, `test_gradiente` 32/32, `test_motor_loop` 47/47. `docs/revision_pre_presentacion.md` v2 con foto Fase 0 (1391 medios) y todo el plan Fase 0-4 completado.
+
 ## [Entrega 48] — 2026-08-26
 
 ### Cambiado

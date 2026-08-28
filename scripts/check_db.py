@@ -88,7 +88,9 @@ def print_totals(conn):
     """Muestra totales por tabla."""
     print()
     print("=== TOTALES ===")
-    for table in ["media", "media_metadata", "config", "media_keypoints"]:
+    for table in ["media", "media_metadata", "config", "media_keypoints",
+                  "media_embeddings", "tracks", "waypoints",
+                  "telegram_chats", "telegram_messages", "telegram_media"]:
         try:
             cnt = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             print(f"  {table:20s} {cnt:>8d}")
@@ -110,7 +112,12 @@ def main(argv=None):
     if args.db:
         db_path = os.path.abspath(args.db)
     else:
-        db_path = os.path.join(os.path.dirname(__file__), "..", "db", "flujos.db")
+        # Usa resolver_db si está disponible (misma resolución que el resto del pipeline)
+        try:
+            from db.util import resolver_db
+            db_path = resolver_db(None)
+        except Exception:
+            db_path = os.path.join(os.path.dirname(__file__), "..", "db", "flujos.db")
 
     if not os.path.isfile(db_path):
         print(f"Error: no se encuentra la DB en {db_path}")
