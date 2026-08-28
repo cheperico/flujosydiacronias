@@ -3,37 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Flujos · Lienzo</title>
+<title>Flujos — Visualizaciones</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/estilos.css">
-<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,sans-serif;background:#f5f5f0;color:#111;min-height:100vh;display:flex;flex-direction:column}
+  header{padding:22px 24px;background:#111;color:#fff}
+  header h1{margin:0;font-size:22px;letter-spacing:.02em}
+  header p{margin:6px 0 0;opacity:.75;font-size:13px;max-width:720px;line-height:1.4}
+  main{flex:1;display:flex;flex-wrap:wrap;gap:18px;padding:24px;max-width:1100px;margin:0 auto;width:100%;align-content:flex-start}
+  .card{flex:1 1 300px;min-width:280px;background:#fff;border:1px solid #ddd;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;transition:box-shadow .15s,border-color .15s}
+  .card:hover{border-color:#111;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+  .card h2{margin:0;font-size:18px}
+  .card p{margin:0;font-size:13px;color:#555;line-height:1.5;flex:1}
+  .card .meta{font-size:11px;color:#888}
+  .card a.btn{display:inline-block;margin-top:6px;background:#111;color:#fff;text-decoration:none;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:500;text-align:center}
+  .card a.btn:hover{background:#000}
+  .card--panel{border-left:4px solid #1976d2}
+  .card--transcripcion{border-left:4px solid #2a7ae2}
+  .card--contexto{border-left:4px solid #1a9e3e}
+  footer{padding:16px 24px;font-size:11px;color:#888;text-align:center;border-top:1px solid #e5e5e5;background:#fafafa}
+  footer a{color:#555}
+</style>
 </head>
 <body>
-
-<canvas id="lienzo"></canvas>
-
-<!-- Contenedor de bloques (en coordenadas mundo) -->
-<div id="mundo"></div>
-
-<!-- Barra lateral derecha -->
-<div id="sidebar">
-  <button id="btn-fluir" class="btn-fluir">Fluir</button>
-  <div class="sidebar-sep"></div>
-  <button id="btn-sonido" class="btn-sonido" type="button">🔊 Sonido</button>
-  <div class="sidebar-sep"></div>
-  <div id="zoom-ctrl">
-    <button class="zoom-btn" id="zoom-in" type="button">+</button>
-    <input type="range" id="zoom-slider" min="0.001" max="5" step="0.001" value="1" orient="vertical">
-    <button class="zoom-btn" id="zoom-out" type="button">−</button>
-    <div class="zoom-label" id="zoom-label">1.0×</div>
+<header>
+  <h1>Flujos y Diacronías — Visualizaciones</h1>
+  <p>Buenos Aires → Tucumán en bicicleta. Tres formas de explorar el mismo viaje: el lienzo interactivo y dos galerías de keypoints al azar (50 distintos en cada carga).</p>
+</header>
+<main>
+  <div class="card card--panel">
+    <h2>Panel de viaje</h2>
+    <p>Lienzo interactivo con bloques por hora, color, provincia, tags y el recorridor de medios (imágenes, videos, 360°, sonidos, mapa, comunicación). Es la visualización web consolidada en <code>deploy/</code>.</p>
+    <div class="meta">SPA · Leaflet + Three.js · filtros combinables</div>
+    <a class="btn" href="panel/">Abrir panel →</a>
   </div>
-  <div class="sidebar-sep"></div>
-  <div id="sidebar-resumen"></div>
-</div>
-
-<script src="vendor/leaflet/leaflet.js"></script>
-<script src="js/three.min.js"></script>
-<script src="js/app.js?v=17"></script>
+  <div class="card card--transcripcion">
+    <h2>Keypoints · Transcripciones</h2>
+    <p>50 fragmentos al azar de <code>media_keypoints key='transcription'</code> (faster-whisper). Click → audio/video en el offset, mapa del lugar y carrusel con las 10 fotos más cercanas (lazy).</p>
+    <div class="meta">50 al azar por carga · player + mapa + fotos cercanas</div>
+    <a class="btn" href="keypoints/transcripciones/">Abrir galería →</a>
+  </div>
+  <div class="card card--contexto">
+    <h2>Keypoints · Contexto</h2>
+    <p>50 momentos al azar del devenir geográfico (<code>contexto_astronomia / clima / ubicacion / movimiento</code>). Mismo player/mapa/carrusel pero desde la reconstrucción contra el track GPX.</p>
+    <div class="meta">50 al azar por carga · player + mapa + fotos cercanas</div>
+    <a class="btn" href="keypoints/contexto/">Abrir galería →</a>
+  </div>
+</main>
+<footer>
+  Deploy portable: copia <code>deploy/</code> a shared hosting con PHP + SQLite (ver <code>docs/deploy.md</code>). Snapshot <code>db/visualizacion.db</code> + <code>media/</code> generados con <code>python scripts/exportar_visualizacion.py</code>.
+</footer>
 </body>
 </html>

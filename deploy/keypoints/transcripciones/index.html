@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es" data-tipo="transcripcion">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keypoints de transcripción — Flujos</title>
+<link rel="stylesheet" href="../../vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="../common.css">
+</head>
+<body>
+<header>
+  <h1>Keypoints de transcripción — Flujos y Diacronías</h1>
+  <div class="actions">
+    <a class="volver" href="../../">← Hub</a>
+    <a class="volver" href="../../panel/">Panel</a>
+    <button id="btn-mezclar" type="button">Mezclar 50 al azar</button>
+  </div>
+  <p id="subtitulo">50 al azar por carga — player + mapa + 10 fotos cercanas (lazy)</p>
+</header>
+<div class="contenedor">
+  <div id="lista"></div>
+  <div id="detalle">
+    <div id="detalle-contenido" style="display:none">
+      <div id="player-wrap"></div>
+      <div id="mapa"></div>
+      <div class="detalle-meta" id="detalle-meta"></div>
+      <h3 style="margin:12px 0 4px;">10 fotos más cercanas</h3>
+      <div id="carrusel"></div>
+      <div class="detalle-meta" id="detalle-texto" style="white-space:pre-wrap;background:#fff;padding:12px;border-radius:8px;border:1px solid #e0e0e0;"></div>
+    </div>
+  </div>
+</div>
+<script src="../../vendor/leaflet/leaflet.js"></script>
+<script src="../common.js"></script>
+</body>
+</html>

@@ -7,6 +7,20 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 50] — 2026-08-28 — Deploy hub con keypoints + offset -5s en transcripción
+
+### Añadido
+- **Deploy hub con 3 visualizaciones** (`deploy/index.html` → hub, `deploy/panel/index.html` lienzo con `<base href="../">`, `deploy/keypoints/transcripciones/` + `contexto/`): hub estático con 3 cards, panel movido sin romper `api/`/`css/`/`vendor/`/`js/`, y 2 SPAs dinámicas de keypoints con `common.css`/`common.js` compartidos. Cada carga pide 50 al azar vía `api/keypoints.php?tipo=&limite=` (`ORDER BY RANDOM()`, sin filtros v1), player con `api/servir_medio.php` (Range), mapa Leaflet vendored (Esri Light Gray) y carrusel lazy de 10 fotos vía `api/fotos_cercanas.php?kp_id=` (Haversine + fallback temporal).
+- **Snapshot `keypoints` en `visualizacion.db`** (`scripts/exportar_visualizacion.py:755`): nueva tabla `keypoints` (id, media_id, kp_key, value, offset_secs, timestamp_absolute, media_tipo/subtipo, archivo/carpeta, latitud/longitud/posicion_fuente, fecha/hora) con 3 índices. Posición materializada: `media.lat/lon` o interpolación GPX (`track_gpx.cargar_tracks`/`interpolar_posicion`, con `BASE` en `sys.path`). Verificado: 2630 filas (transcription 1367, contexto_* 887, ubicacion_video 376), 2630 con posición.
+- **Endpoints `api/keypoints.php` y `fotos_cercanas.php`**: whitelist de `tipo`, clamp de `limite`, prepared statements, `RANDOM()` por carga y `EXISTS`/`julianday` para fotos cercanas (aprox equirectangular + Haversine exacto para `dist_m`).
+
+### Cambiado
+- **Offset -5 s en transcripciones** (`deploy/keypoints/common.js:114`, `scripts/generar_galeria_keypoints.py:384`): galerías de transcripción arrancan `Math.max(0, offset-5)` para dar contexto auditivo; `contexto` mantiene offset exacto.
+- **TUI Visualizaciones** (`flujos.py:1898`): intro del menú ahora explica hub/panel/keypoints y que el snapshot incluye keypoints. `Exportar visualización` aclara hub+panel+keypoints y los 2 endpoints nuevos. `Galerías de keypoints` diferencia `pruebas/` local (`file://`) vs `deploy/keypoints/` portable.
+
+### Documentación
+- `docs/deploy.md` reescrito (§ Estructura, Cómo regenerar, Endpoints API con `keypoints`/`fotos_cercanas`, Hub+Panel+Keypoints).
+
 ## [Entrega 49] — 2026-08-28 — Revisión pre-presentación completa
 
 ### Añadido

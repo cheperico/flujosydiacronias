@@ -24,7 +24,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FLUJOS_DB = os.path.join(BASE, 'db', 'flujos.db')
@@ -607,6 +607,27 @@ def main(argv: list[str] | None = None) -> None:
             has_media INTEGER DEFAULT 0,
             fotos TEXT
         );
+
+        CREATE TABLE keypoints (
+            id INTEGER PRIMARY KEY,
+            media_id INTEGER NOT NULL,
+            kp_key TEXT NOT NULL,
+            value TEXT,
+            offset_secs REAL,
+            timestamp_absolute TEXT,
+            media_tipo TEXT,
+            media_subtipo TEXT,
+            archivo TEXT,
+            carpeta TEXT,
+            latitud REAL,
+            longitud REAL,
+            posicion_fuente TEXT,
+            fecha TEXT,
+            hora TEXT
+        );
+        CREATE INDEX idx_kp_key ON keypoints(kp_key);
+        CREATE INDEX idx_kp_media ON keypoints(media_id);
+        CREATE INDEX idx_kp_ts ON keypoints(timestamp_absolute);
     """)
 
     insert_sql = """
@@ -730,6 +751,104 @@ def main(argv: list[str] | None = None) -> None:
         )
         tg_count += 1
     dst.commit()
+
+    # ── Exportar keypoints (con posición materializada) ────────────
+    def _norm_dt(ts: str | None):
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except (ValueError, TypeError):
+            return None
+
+    tracks = []
+    try:
+        import sys
+        if BASE not in sys.path:
+            sys.path.insert(0, BASE)
+        from scripts.track_gpx import cargar_tracks, interpolar_posicion
+        tracks = cargar_tracks(src)
+        if tracks:
+            print(f"  Tracks GPX cargados: {len(tracks)}")
+        else:
+            print("  Tracks GPX: 0 (sin posición interpolada para keypoints sin GPS propio)")
+    except Exception as e:
+        print(f"  Aviso: no se pudieron cargar tracks GPX ({e})")
+
+    def _resolver_posicion(kp_media_lat, kp_media_lon, kp_ts_abs):
+        if kp_media_lat is not None and kp_media_lon is not None:
+            return kp_media_lat, kp_media_lon, "media"
+        dt = _norm_dt(kp_ts_abs)
+        if dt is None or not tracks:
+            return None, None, None
+        try:
+            for tr in tracks:
+                pos = interpolar_posicion(tr["puntos_tiempo"], dt)
+                if pos is not None:
+                    lat, lon, _ele = pos
+                    return lat, lon, "track"
+        except Exception:
+            pass
+        return None, None, None
+
+    try:
+        kp_rows = src.execute("""
+            SELECT k.id, k.media_id, k.key, k.value, k.timestamp_offset_secs,
+                   k.timestamp_absolute,
+                   m.type, m.subtype, m.filename_original, m.carpeta,
+                   m.latitude, m.longitude
+            FROM media_keypoints k
+            JOIN media m ON m.id = k.media_id
+            ORDER BY k.id
+        """).fetchall()
+    except sqlite3.OperationalError as e:
+        print(f"  Aviso: no se pudo leer media_keypoints ({e})")
+        kp_rows = []
+
+    kp_insert = """
+        INSERT INTO keypoints
+            (id, media_id, kp_key, value, offset_secs, timestamp_absolute,
+             media_tipo, media_subtipo, archivo, carpeta,
+             latitud, longitud, posicion_fuente, fecha, hora)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
+    kp_count = 0
+    kp_con_pos = 0
+    for r in kp_rows:
+        lat, lon, fuente = _resolver_posicion(r["latitude"], r["longitude"], r["timestamp_absolute"])
+        if lat is not None:
+            kp_con_pos += 1
+        ts_abs = r["timestamp_absolute"]
+        fecha_kp = hora_kp = None
+        if ts_abs:
+            try:
+                dt = _norm_dt(ts_abs)
+                if dt:
+                    fecha_kp = dt.strftime("%Y-%m-%d")
+                    hora_kp = dt.strftime("%H:%M")
+            except Exception:
+                pass
+        try:
+            dst.execute(kp_insert, (
+                r["id"], r["media_id"], r["key"], r["value"], r["timestamp_offset_secs"],
+                r["timestamp_absolute"],
+                r["type"], r["subtype"], r["filename_original"], r["carpeta"],
+                lat, lon, fuente, fecha_kp, hora_kp,
+            ))
+            kp_count += 1
+        except Exception as e:
+            print(f"  Error insertando keypoint {r['id']}: {e}")
+    dst.commit()
+    print(f"  Keypoints exportados: {kp_count} (con posición: {kp_con_pos}, sin: {kp_count - kp_con_pos})")
+    if kp_count:
+        try:
+            for row in dst.execute("SELECT kp_key, COUNT(*) c FROM keypoints GROUP BY kp_key ORDER BY c DESC"):
+                print(f"    {row[0]}: {row[1]}")
+        except Exception:
+            pass
 
     # Resumen
     print(f"\n  Insertados: {count} registros")

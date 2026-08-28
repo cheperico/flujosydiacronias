@@ -383,14 +383,17 @@ function mostrarDetalle(idx) {{
   wrap.innerHTML = '';
   if (d.file_uri) {{
     let el = null;
+    // Transcripción: 5 s antes del keypoint si es posible
+    var seek = d.offset;
+    if (d.key === 'transcription' && d.offset != null) seek = Math.max(0, d.offset - 5);
     if (d.type === 'video') {{
       el = document.createElement('video');
       el.controls = true;
       el.id = 'player';
       el.src = d.file_uri;
-      if (d.offset != null) {{
+      if (seek != null) {{
         el.addEventListener('loadedmetadata', () => {{
-          try {{ el.currentTime = d.offset; }} catch(e) {{}}
+          try {{ el.currentTime = seek; }} catch(e) {{}}
         }}, {{ once: true }});
       }}
     }} else if (d.type === 'audio') {{
@@ -400,9 +403,9 @@ function mostrarDetalle(idx) {{
       el.style.background = '#fff';
       el.style.border = '1px solid #ddd';
       el.src = d.file_uri;
-      if (d.offset != null) {{
+      if (seek != null) {{
         el.addEventListener('loadedmetadata', () => {{
-          try {{ el.currentTime = d.offset; }} catch(e) {{}}
+          try {{ el.currentTime = seek; }} catch(e) {{}}
         }}, {{ once: true }});
       }}
     }}

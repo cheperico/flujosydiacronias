@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base href="../">
+<title>Flujos · Lienzo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+</head>
+<body>
+
+<canvas id="lienzo"></canvas>
+
+<!-- Contenedor de bloques (en coordenadas mundo) -->
+<div id="mundo"></div>
+
+<!-- Barra lateral derecha -->
+<div id="sidebar">
+  <button id="btn-fluir" class="btn-fluir">Fluir</button>
+  <div class="sidebar-sep"></div>
+  <button id="btn-sonido" class="btn-sonido" type="button">🔊 Sonido</button>
+  <div class="sidebar-sep"></div>
+  <div id="zoom-ctrl">
+    <button class="zoom-btn" id="zoom-in" type="button">+</button>
+    <input type="range" id="zoom-slider" min="0.001" max="5" step="0.001" value="1" orient="vertical">
+    <button class="zoom-btn" id="zoom-out" type="button">−</button>
+    <div class="zoom-label" id="zoom-label">1.0×</div>
+  </div>
+  <div class="sidebar-sep"></div>
+  <div id="sidebar-resumen"></div>
+</div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="js/three.min.js"></script>
+<script src="js/app.js?v=17"></script>
+</body>
+</html>

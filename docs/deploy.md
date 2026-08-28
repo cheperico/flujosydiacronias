@@ -29,21 +29,29 @@ DB real del pipeline — es un snapshot desacoplado para la web.
 
 ```
 deploy/
-├── index.html                 # Página "Lienzo" (SPA)
+├── index.html                 # Hub — 3 cards: Panel de viaje / Transcripciones / Contexto
+├── panel/index.html           # Lienzo (SPA) — movido desde deploy/index.html (base href="../")
+├── keypoints/
+│   ├── common.css             # Estilos compartidos de galerías
+│   ├── common.js              # Lógica compartida (fetch random, player, mapa, carrusel lazy)
+│   ├── transcripciones/index.html  # Galería 50 al azar · transcription
+│   └── contexto/index.html         # Galería 50 al azar · contexto_*
 ├── .htaccess                  # Seguridad Apache (protege .db/.json/.md/.py)
 ├── includes/
 │   └── db.php                 # Conexión PDO a deploy/db/visualizacion.db
-├── api/                       # 7 endpoints JSON
+├── api/                       # 9 endpoints JSON (7 originales + 2 keypoints)
 │   ├── medios_filtrados.php   # Medios con filtros (municipio/color/provincia/tag/tipo)
-│   ├── servir_medio.php       # Archivo binario del medio (con thumbnails GD)
+│   ├── servir_medio.php       # Archivo binario del medio (con thumbnails GD + Range)
 │   ├── tags.php               # Nube de tags desde keywords (ia_keywords), no descripciones
 │   ├── recorrido.php          # Puntos + colores del recorrido
 │   ├── puntos.php             # Embeddings del lienzo (⚠️ hoy vacío, ver "Gaps")
 │   ├── mensajes_telegram.php  # Mensajes de Telegram de un municipio
-│   └── textos.php             # Transcripciones para el bloque "Textos" (audios priorizados)
+│   ├── textos.php             # Transcripciones para el bloque "Textos" (audios priorizados)
+│   ├── keypoints.php          # 50 keypoints al azar por tipo (ORDER BY RANDOM())
+│   └── fotos_cercanas.php     # 10 fotos más cercanas a un keypoint (lazy)
 ├── css/estilos.css
 ├── js/app.js                   # Lógica del lienzo (bloques, paletas, FLOW)
-├── db/visualizacion.db         # SNAPSHOT exportado (generado, no versionar)
+├── db/visualizacion.db         # SNAPSHOT exportado (generado, no versionar) — ahora incluye tabla keypoints
 ├── media/                      # Medios copiados por el deploy (generado)
 └── spec.json                   # Spec portable del motor de loop (generada, no versionar)
 ```
@@ -64,7 +72,8 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
    python scripts/exportar_visualizacion.py
    ```
    Lee `db/flujos.db` y **recrea** `visualizacion.db` por completo (medios,
-   categorias, telegram_messages).
+   categorias, telegram_messages, **keypoints** — posiciones materializadas con
+   `media.lat/lon` o interpolación GPX).
    - **Deploy genérico (default)**: escribe en `deploy/` (raíz del proyecto)
      copiando los medios a `deploy/media/...`. `--transcode` transcodifica videos
      grandes/360° a MP4/H.264 web (opt-in; sin él solo copia tal cual).
@@ -106,6 +115,8 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
 | `medios_filtrados.php` | `limite` (1–20), `tipo` (csv), `municipio`, `color`, `provincia`, `tag`, `horas`, `subtipo` (todos aceptan csv; `horas` filtra por franja `[min,max]` en hora local; `subtipo` p. ej. `360`) | resultados agrupados por tipo (incluye `titulo` para textos) |
 | `servir_medio.php` | `id` (obligatorio), `thumb` (opcional) | archivo binario con **HTTP Range** (`206`/`416`, `Accept-Ranges`) — necesario para `<video>` |
 | `tags.php` | `limite` (10–100, default 40) | `{total, tags:[{tag, frecuencia, peso}]}` |
+| `keypoints.php` | `tipo` (`transcripcion`/`transcription` → `transcription`, `contexto` → `contexto_%`; default `transcripcion`), `limite` (1–100, default 50) | `{tipo, limite, total_disponible, total, keypoints: [{id, media_id, kp_key, value, offset_secs, timestamp_absolute, media_tipo, archivo, latitud, longitud, posicion_fuente}]}` — **ORDER BY RANDOM()** en cada carga |
+| `fotos_cercanas.php` | `kp_id` (obligatorio), `limite` (1–10, default 10) | `{kp_id, kp_latitud, kp_longitud, total, fotos:[{id, archivo, latitud, longitud, dist_m, delta_secs}]}` — 10 más cercanas (Haversine) con fallback temporal, lazy |
 
 > **Nota — nube de tags**: `tags.php` arma la nube contando las **keywords**
 > (`ia_keywords` → columna `keywords` del snapshot), **no** las descripciones.
@@ -185,6 +196,13 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
   exportador con `--transcode` (ver "Cómo regenerar").
 
 ---
+
+## Hub + Panel + Keypoints (deploy como 3 visualizaciones)
+
+* **`/` (hub)** — `deploy/index.html` con 3 cards: Panel de viaje (`panel/`), Transcripciones (`keypoints/transcripciones/`) y Contexto (`keypoints/contexto/`). Hub es estático (sin PHP).
+* **`panel/`** — Lienzo original (`deploy/panel/index.html` con `<base href="../">` para que `api/`, `css/`, `vendor/` y `js/` sigan resolviendo a `deploy/`). Mantiene los 7 endpoints previos intactos.
+* **`keypoints/*`** — SPAs dinámicas: `fetch` a `api/keypoints.php?tipo=&limite=50` (**random puro por carga**, sin filtros v1) y por cada keypoint seleccionado lazy `api/fotos_cercanas.php?kp_id=`. Player usa `api/servir_medio.php?id=media_id` (Range), mapa Leaflet vendored (`vendor/leaflet/` + Esri Light Gray), carrusel 3 s. Estilos/JS compartidos en `keypoints/common.{css,js}`. **Transcripciones** arrancan 5 s antes del `offset_secs` (clamp a 0) para dar contexto auditivo.
+* **Snapshot:** `scripts/exportar_visualizacion.py` ahora materializa `keypoints` en `visualizacion.db` (sid `media` o interpolación GPX vía `track_gpx.cargar_tracks`/`interpolar_posicion`); sin GPX queda `latitud=NULL`. Verificar con `python scripts/exportar_visualizacion.py --snapshot-local` y `curl .../api/keypoints.php`.
 
 ## Servir
 

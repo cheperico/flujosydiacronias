@@ -1902,7 +1902,12 @@ def opcion_visualizaciones(db_path: str | None = None):
         "2": ("Exportar visualización web (deploy)", opcion_exportar_visualizacion),
         "3": ("TouchDesigner (puente OSC)", opcion_touchdesigner),
         "4": ("Galerías de keypoints (HTML)", opcion_galerias_keypoints),
-    }, db_path)
+    }, db_path, intro=(
+        "  Hub en deploy/index.html → 3 entradas: Panel de viaje (panel/),\n"
+        "  Keypoints transcripción y Keypoints contexto (keypoints/*).\n"
+        "  El snapshot deploy/db/visualizacion.db ahora incluye la tabla\n"
+        "  keypoints (posiciones materializadas). Ver docs/deploy.md."
+    ))
 
 
 def opcion_mapas(db_path: str | None = None):
@@ -1980,11 +1985,13 @@ def opcion_exportar_visualizacion(db_path: str | None = None):
         "4": ("Regenerar spec del loop (deploy/spec.json)", _spec_loop),
         "5": ("Previsualizar deploy (dry-run)", _deploy_dry),
     }, db_path, intro=(
-        "Exporta un snapshot de flujos.db para una visualizacion web\n"
-        "  (ver docs/deploy.md). El deploy (default: deploy/ en la raiz del\n"
-        "  proyecto) copia los medios y pregunta si transcodificar videos\n"
-        "  grandes/360° a MP4/H.264 web (default: sí). --snapshot-local es\n"
-        "  el modo dev local (sin copiar medios)."
+        "Exporta un snapshot de flujos.db para la web portable (ver docs/deploy.md).\n"
+        "  deploy/ es hub + panel + keypoints: index.html (hub) → panel/index.html\n"
+        "  (lienzo), keypoints/transcripciones/ y keypoints/contexto/ (50 al azar\n"
+        "  por carga, player+mapa+fotos lazy vía api/keypoints.php + fotos_cercanas.php).\n"
+        "  El snapshot deploy/db/visualizacion.db incluye ahora keypoints con\n"
+        "  posición materializada (media o interpolación GPX). Copia a media/ y\n"
+        "  pregunta si transcodificar 360°/grandes a MP4 web (default sí)."
     ))
 
 
@@ -2232,7 +2239,13 @@ def opcion_galerias_keypoints(db_path: str | None = None):
     _menu("GALERÍAS DE KEYPOINTS", {
         "1": ("Keypoints de transcripción (50 al azar)", lambda db: _ejecutar_galeria_keypoints("transcripcion", db)),
         "2": ("Keypoints de contexto (50 al azar)", lambda db: _ejecutar_galeria_keypoints("contexto", db)),
-    }, db_path)
+    }, db_path, intro=(
+        "  Local: genera pruebas/keypoints_*.html con file:// (solo local,\n"
+        "  tras relocate hay que regenerar). Portable: el deploy ya sirve las\n"
+        "  mismas galerías en deploy/keypoints/*/ (PHP + RANDOM por carga,\n"
+        "  player via servir_medio.php, fotos lazy). Reexportar deploy tras\n"
+        "  tocar keypoints para actualizar visualizacion.db."
+    ))
 
 
 # ── Backfill end_time ─────────────────────────────────────────────────────────
