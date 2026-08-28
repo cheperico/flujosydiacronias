@@ -7,6 +7,24 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 48] — 2026-08-26
+
+### Cambiado
+- **Filtro duro por tags en el loop** (`scripts/ai_media/loop_db.py`): las tags elegidas en TD ahora **filtran** (antes solo eran prioridad de `score`, por eso al elegir tags seguían llegando TODAS las imágenes del arco).
+  - `_filtrar_media`: nueva condición `EXISTS` sobre `media_metadata` con **OR de `LIKE '%tag%'`** sobre las 5 fuentes de keywords (`CLAVES_TAGS_LOOP`: `ia_keywords`, `ia_keywords_transcripcion`, `ia_keywords_texto`, `ia_keywords_sonido`, `ia_keywords_video` — el mismo universo que arma la nube `elec_tags` en `scripts/td/elecciones.py`). Un medio pasa si contiene **alguna** de las tags elegidas.
+  - `generar_loop`: **fallback a prioridad** — si el arco queda con menos de `MIN_MEDIOS_FALLBACK_TAGS` (default 1) medios con las tags, se re-genera **sin** filtro de tags (todo el filtro base + `score`) para que la instalación nunca se quede sin contenido; el resumen anota `FALLBACK a prioridad` en `notas`.
+  - Los **colores** siguen siendo prioridad (no filtran), como antes.
+- **Diagnóstico previo**: mi consulta "semáforo tiene 0 ocurrencias" fue un falso negativo (busqué `%semafor%` sin acento; el valor real es `semáforo` con tilde y `LIKE` de SQLite distingue á/a). `semáforo` SÍ está en `elec_tags` (9 ocurrencias) y filtra correctamente (7 medios).
+
+### Pendiente
+- Reemplazar el fallback de tags por un **aviso real de insuficiencia** ("no hay suficientes medios seleccionados") cuando el arco quede sin medios con las tags elegidas.
+
+### Documentación
+- `docs/motor_loop.md` (§4): fila de Tags = filtro duro OR sobre 5 fuentes + fallback + pendiente.
+- `docs/retorno_fluir_td.md` (§9): decisión nº 15.
+
+---
+
 ## [Entrega 47] — 2026-08-26
 
 ### Corregido

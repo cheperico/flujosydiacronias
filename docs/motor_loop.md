@@ -131,11 +131,21 @@ con AND (todas las condiciones presentes deben cumplirse):
 |-------|-----------|
 | Horas (arco) | el `HARpart` de la hora cae en un segmento (ver §3.2) |
 | Municipios | `media.municipio IN (...)` |
-| Colores | `media.color_{1,2,3}_name_basic IN (...)` |
-| Tags | `media_metadata.key='ia_keywords' AND value LIKE '%tag%'` |
+| Colores | **prioridad** (no filtra): suman al `score` de cada medio |
+| Tags | `EXISTS media_metadata.key IN (5 fuentes de keywords) AND value LIKE '%tag%'` — **OR** entre tags (un medio pasa si contiene ALGUNA); filtro DURO cuando se eligen |
 | Días | `media_metadata.key='dia_semana' AND value IN (...)` |
 | Clima | `media_metadata.key='weather_label' AND value IN (...)` |
 | Ideas | query semántica por embeddings (definido en docs/instalación §1.2) |
+
+**Tags = filtro duro con fallback**: cuando el visitante elige tags, SOLO entran
+al loop los medios que contienen alguna (OR de LIKE `%tag%` sobre las 5 fuentes
+de keywords: `ia_keywords`, `ia_keywords_transcripcion`, `ia_keywords_texto`,
+`ia_keywords_sonido`, `ia_keywords_video` — el mismo universo que arma la nube
+`elec_tags`). Si el arco queda con menos de `MIN_MEDIOS_FALLBACK_TAGS`
+(default 1) medios, se cae a **prioridad** (se ignoran las tags y se rellena
+con todo el filtro base + score) para que la instalación nunca se quede sin
+contenido; el resumen anota `FALLBACK a prioridad`. **Pendiente**: reemplazar
+el fallback por un aviso real de "no hay suficientes medios seleccionados".
 
 Si no hay criterios, se incluyen todos los medios (modo exploración).
 

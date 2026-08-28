@@ -237,7 +237,7 @@ Detalle de args CLI de cada script en su **docstring** (o `python script.py --he
 | `ai_media/generar_sinonimos_localidades.py` | Propone sinónimos de localidades cruzando tags observados en `--clave` (default `ia_keywords`) contra georef/contexto | Standalone: `python scripts/ai_media/generar_sinonimos_localidades.py [--clave ia_keywords]` |
 | `ai_media/checkpoint.py` | Checkpoint + detención limpia para procesos IA | Usado por improve_db y otros |
 | `ai_media/proxy.py` | Redimensiona imágenes a ~800px | Usado por limpiar_tandas/clustering/batch_selector |
-| `ai_media/loop_engine.py` / `loop_db.py` | Motor de loop: arcos horarios, posicionamiento, spec JSON | CLI: `python scripts/ai_media/loop_db.py --horas ... --salida spec.json` |
+| `ai_media/loop_engine.py` / `loop_db.py` | Motor de loop: arcos horarios, posicionamiento, spec JSON. **Filtro duro por tags**: cuando se eligen tags, `_filtrar_media` agrega `EXISTS` con OR de `LIKE '%tag%'` sobre `CLAVES_TAGS_LOOP` (5 fuentes de keywords, mismo universo que `elec_tags`); si el arco queda con < `MIN_MEDIOS_FALLBACK_TAGS` (1), `generar_loop` cae a prioridad (sin tags, nunca vacío) y anota `FALLBACK a prioridad` en `resumen.notas`. Pendiente: aviso real de insuficiencia | CLI: `python scripts/ai_media/loop_db.py --horas ... --salida spec.json` |
 | `check_db.py` / `check_gps.py` / `check_db_data.py` | Verificación de DB y GPS | TUI Consultar; standalone |
 
 ---

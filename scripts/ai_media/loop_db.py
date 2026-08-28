@@ -87,6 +87,25 @@ ELEVACION_ALBA_ALTA = 3.0
 # Hora de día por defecto para textos sin timestamp (puntos curados).
 HORA_DEFECTO_TEXTO = 12.0
 
+# Fuentes de keywords sobre las que se aplica el filtro duro de tags y el
+# `score` de prioridad. Es el MISMO universo que arma la nube de elecciones
+# (scripts/td/elecciones.py::CLAVES_TAGS): así cualquier tag que el visitante
+# pueda elegir en TouchDesigner tiene correspondencia aquí.
+CLAVES_TAGS_LOOP = (
+    "ia_keywords",
+    "ia_keywords_transcripcion",
+    "ia_keywords_texto",
+    "ia_keywords_sonido",
+    "ia_keywords_video",
+)
+
+# Umbral de fallback de tags: si el filtro DURO por tags deja MENOS de este
+# número de medios dentro del arco, se cae a prioridad (se ignoran las tags y
+# se rellena con todo el filtro base + score) para que la instalación nunca se
+# quede sin contenido. El aviso de insuficiencia real ("no hay suficientes
+# medios seleccionados") queda pendiente como reemplazo de este fallback.
+MIN_MEDIOS_FALLBACK_TAGS = 1
+
 # Períodos de twilight considerados "noche"
 NOCHE_PERIODOS = {
     "noche", "crepuculo_civil", "crepuculo_nautico", "crepuculo_astronomico",
@@ -242,16 +261,20 @@ def _filtrar_media(conn: sqlite3.Connection,
     Evalúa en SQL (AND) los criterios que descartan medios:
         - municipios: `m.municipio IN (...)` cuando vienen elegidos.
         - días y clima (legado): EXISTS sobre `media_metadata`.
+        - tags: EXISTS sobre `media_metadata` cuando vienen elegidas
+          (OR de LIKE `%tag%` sobre las 5 fuentes de keywords; un medio pasa
+          si contiene ALGUNA de las tags).
     El rango horario se aplica en Python por `_extraer_hora` (hora local) y
     descarta lo que queda fuera de [hmin, hmax] (ambos inclusive) o sin hora.
 
-    Las PRIORIDADES (colores y etiquetas) NO se aplican aquí: se resuelven
-    como `score` en `_calcular_score`, sin descartar nada.
+    Los COLORES NO se aplican aquí (prioridad: `_calcular_score`). Las TAGS,
+    en cambio, SON filtro duro cuando se eligen — con fallback a prioridad si
+    el arco queda vacío (ver `generar_loop`).
 
     Args:
         conn: conexión SQLite.
         filtrar: dict opcional: municipios, colores, tags, días, clima
-                 (colores/tags se ignoran en la query; solo prioridad).
+                 (tags = filtro duro; colores = solo prioridad).
         rango_horas: (hmin, hmax) del filtro horario o None (sin restricción).
 
     Returns:
@@ -282,13 +305,26 @@ def _filtrar_media(conn: sqlite3.Connection,
         cond_media.append(f"m.municipio IN ({','.join('?' * len(municipios))})")
         params_media.extend(municipios)
 
-    # tags y colores NO condicionan: son prioridades (score), no filtros.
-    # tags: SOLO prioridad (no se descarta un verde por no llevar el tag).
+    # Colores: NO condicionan (prioridad de score, no filtro).
+    # Tags: FILTRO DURO cuando se eligen (OR de LIKE sobre las 5 fuentes de
+    # keywords). Un medio pasa si contiene ALGUNA de las tags elegidas.
 
     # Días: EXISTS sobre dia_semana (legado).
     # Clima: EXISTS sobre weather_label del medio (legado).
     cond_meta: list[str] = []
     params_meta: list[Any] = []
+
+    tags = [t for t in (filtrar.get("tags") or []) if t and t.strip()]
+    if tags:
+        marcadores_claves = ",".join("?" * len(CLAVES_TAGS_LOOP))
+        likes = " OR ".join(["md_t.value LIKE ?"] * len(tags))
+        cond_meta.append(
+            "EXISTS (SELECT 1 FROM media_metadata md_t "
+            "WHERE md_t.media_id = m.id "
+            f"AND md_t.key IN ({marcadores_claves}) "
+            f"AND ({likes}))")
+        params_meta.extend(CLAVES_TAGS_LOOP)
+        params_meta.extend([f"%{t}%" for t in tags])
 
     if dias:
         cond_meta.append(
@@ -514,7 +550,11 @@ def generar_loop(
 
     Modelo de selección (rediseño 2026-08):
       Filtros DUROS: rango horario [min(horas), max(horas)] (hora local,
-      puntas incluidas) + municipios (+ días/clima legado).
+      puntas incluidas) + municipios (+ días/clima legado) + TAGS (cuando se
+      eligen: OR de LIKE `%tag%` sobre las 5 fuentes de keywords; un medio
+      pasa si contiene ALGUNA). Si el arco queda con menos de
+      `MIN_MEDIOS_FALLBACK_TAGS`, FALLBACK a prioridad (se ignoran las tags y
+      se rellena con todo el filtro base; nunca vacío) y se anota en el resumen.
       Prioridades (NO descartan): color (solo fotos) y etiquetas → suman al
       `score` de cada medio.
       Orden de salida: por hora local asc; desempate entre la misma hora por
@@ -565,7 +605,27 @@ def generar_loop(
     conn = abrir(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        items = _seleccionar(conn, filtros_, (hmin, hmax))
+        tags_elegidas = [t for t in (filtros_.get("tags") or []) if t and t.strip()]
+        fallback_tags = False
+
+        if tags_elegidas:
+            # Filtro DURO por tags: solo medios que contengan alguna tag.
+            items = _seleccionar(conn, filtros_, (hmin, hmax))
+            if len(items) < MIN_MEDIOS_FALLBACK_TAGS:
+                # Fallback a prioridad: el arco quedó sin medios con las tags;
+                # se rellena con el filtro base + score (nunca vacío). El aviso
+                # de insuficiencia ("no hay suficientes medios seleccionados")
+                # queda pendiente de reemplazar este fallback.
+                log.warning(
+                    "  Fallback de tags: solo %d medio(s) con las tags en el "
+                    "arco (mínimo %d); se re-genera sin filtro de tags "
+                    "(prioridad).", len(items), MIN_MEDIOS_FALLBACK_TAGS)
+                filtros_sin_tags = {k: v for k, v in filtros_.items()
+                                    if k != "tags"}
+                items = _seleccionar(conn, filtros_sin_tags, (hmin, hmax))
+                fallback_tags = True
+        else:
+            items = _seleccionar(conn, filtros_, (hmin, hmax))
 
         # 3+4+5. Armar medios (con score) y chiches (consolidados).
         medios: list[dict] = []
@@ -664,7 +724,12 @@ def generar_loop(
     else:
         notas.append("colores: sin prioridad")
     if tags:
-        notas.append(f"prioridad tags: {'; '.join(tags)} (no filtra)")
+        if fallback_tags:
+            notas.append(
+                f"tags: {'; '.join(tags)} (elegidas pero sin medios en el arco → "
+                "FALLBACK a prioridad)")
+        else:
+            notas.append(f"filtro duro tags: {'; '.join(tags)} (solo medios con alguna)")
     else:
         notas.append("tags: sin prioridad")
     if dias:
