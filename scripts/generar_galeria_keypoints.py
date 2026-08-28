@@ -267,7 +267,7 @@ def _generar_html(
 
     nota_portabilidad = f"<!-- Snapshot de rutas absolutas al {ahora} desde DB {tipo}; tras relocate/mover_medios o cambio de computadora regenerar este HTML. -->"
     html = f"""<!DOCTYPE html>
-<!-- {nota_portabilidad} -->
+{nota_portabilidad}
 <html lang="es">
 <head>
 <meta charset="utf-8">
