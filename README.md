@@ -83,16 +83,18 @@ python flujos.py --help         # Ayuda general
 | `gradient [--mode]` | Calcular gradientes de ruta entre puntos GPS |
 | `query [--distinct --where --search --count --limit]` | Consultar la base de datos |
 | `relocate --new-root CARPETA` | Actualizar rutas si los archivos se mudaron |
-| `check-db` | Resumen de la DB (totales por tipo) |
-| `check-gps` | Revisar qué archivos tienen GPS |
+| `check-db` | Resumen de la DB (totales, salud, batches, GPS, signo) — opciones: `--verbose/-v --limit N --db RUTA` |
+| `check-data` / `check-clima` / `check-geo` | Stats de clima/día/geocode — opciones: `--db RUTA --limit N` |
+| `check-gps` | Revisar que archivos tienen GPS (ExifTool) — opciones: `--exiftool RUTA --samples N --folder CARPETA --db RUTA` |
 | `undo-ingest` / `undo` | Deshacer una ingesta por batch ID |
 | `backfill-end-time` / `backfill` `[--mode]` | Precalcular end_time = timestamp_utc + duration_secs |
 | `backup-db` / `backup` | Crear backup de la DB |
 | `restore-db` / `restore` | Restaurar DB desde un backup |
 | `reset-db` / `reset` | Resetear la DB (con backup previo) |
 | `export-csv` / `csv` `[--table] [--output]` | Exportar tablas de la DB a CSV |
-| `import-telegram` / `tg` | Importar export de Telegram a la DB |
+| `import-telegram` / `tg` | Importar export de Telegram a la DB (sin --destino; consolidar con mover/consolidar) |
 | `ingest-textos` / `textos` | Ingerir textos `.md` de `textos/` como medios type='text' |
+| `ingest-gpx` / `gpx` | Ingerir track GPX (waypoints, registro, backfill altitud) — opciones: `--gpx RUTA --mode` |
 | `mover --new-root X --mode mover` | Mover/copiar medios y actualizar rutas en DB |
 | `detectar-contenedores` / `contenedores` | Auditar contenedores de video/audio con ffprobe (streams faltantes) → `contenedor_estado` |
 | `limpiar-descripciones` / `descripciones` | Limpiar descripciones con eco del prompt (meta-intros) → recorta prefijos en `ia_description_en`/`ia_description` |
@@ -103,6 +105,7 @@ python flujos.py --help         # Ayuda general
 | `astronomia` | Calcular posición del sol (NOAA) + clasificación twilight |
 | `mapa` | Generar mapa interactivo Folium de la ruta |
 | `mapa-municipios` / `mapas` | Generar un mapa HTML por municipio recorrido (variantes ruta/puntos/contexto/gradiente) |
+| `corregir-360` / `corregir360` | Corregir timestamps 360° Insta360 (CreateDate UTC→ART, --reubicar) — temporario |
 
 Cada subcomando acepta `--help` para ver sus opciones específicas.
 
@@ -181,23 +184,28 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
   │  └─ 0. Volver
 
 4. Consultar base de datos
-  ├─ 1. Ver resumen de la DB
-  └─ 2. Listar... (tipo, autor, carpeta, color, provincia, texto, GPS, detalle)
+  ├─ 1. Ver resumen de la DB (totales, salud, batches, GPS, signo)
+  ├─ 2. Listar... (tipo, autor, carpeta, color, provincia, texto, GPS, detalle, consulta libre)
+  ├─ 3. Stats clima/día/geocode (weather, dia_semana, municipio)
+  └─ 4. Detalle por ID
 
 5. Mantenimiento DB
   ├─ Hoja 1: Mantenimiento general
-  │  ├─ 1. Relocalizar medios (cambio de raiz)
-  │  ├─ 2. Calcular posición del sol (astronomía)
-  │  ├─ 3. Backfill end_time
-  │  ├─ 4. Backup DB (solo backup, sin borrar)
-  │  ├─ 5. Restore DB desde backup
-  │  ├─ 6. Resetear DB (backup + limpiar)
-  │  ├─ 7. Exportar DB a CSV
-  │  ├─ 8. Mover/Copiar medios
-  │  ├─ 9. Auditar contenedores (streams faltantes)
+  │  ├─ 1. Gestión de rutas (relocalizar / mover / consolidar)
+  │  │   ├─ 1. Relocalizar medios (cambio de raiz, --old-root)
+  │  │   ├─ 2. Mover/Copiar medios (--mode mover|copiar)
+  │  │   ├─ 3. Consolidar medios (--new-root, --mode)
+  │  │   └─ 0. Volver
+  │  ├─ 2. Backfill end_time
+  │  ├─ 3. Backup DB (solo backup, sin borrar)
+  │  ├─ 4. Restore DB desde backup
+  │  ├─ 5. Resetear DB (backup + limpiar)
+  │  ├─ 6. Exportar DB a CSV
+  │  ├─ 7. Auditar contenedores (streams faltantes)
   │  │   ├─ 1. Ejecutar auditoría (anotar estado en DB)
   │  │   ├─ 2. Previsualizar (dry-run)
   │  │   └─ 0. Volver
+  │  ├─ 8. Ver/podar backups
   │  ├─ n. Siguiente >> → Hoja 2
   │  └─ 0. Volver
   ├─ Hoja 2: Auditoría de medios
@@ -231,19 +239,22 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
       ├─ 4. Regenerar spec del loop (deploy/spec.json)
       ├─ 5. Previsualizar deploy (dry-run)
       └─ 0. Volver
-  └─ 3. TouchDesigner (puente OSC)
-      ├─ 1. Enviar elecciones (horas, municipios, colores, tags, días, clima)
-      ├─ 2. Modo "Fluir" (recibir ráfaga de TD y generar loop)
-      │   ├─ 1. Una ráfaga (prueba rápida)
-      │   └─ 2. Modo instalación: escucha continua (Enter para detener)
-      ├─ 3. Probar OSC (eco)
-      └─ 0. Volver
+  ├─ 3. TouchDesigner (puente OSC)
+  │   ├─ 1. Enviar elecciones (horas, municipios, colores, tags, días, clima)
+  │   ├─ 2. Modo "Fluir" (recibir ráfaga de TD y generar loop)
+  │   │   ├─ 1. Una ráfaga (prueba rápida)
+  │   │   └─ 2. Modo instalación: escucha continua (Enter para detener)
+  │   ├─ 3. Probar OSC (eco)
+  │   └─ 0. Volver
   └─ 4. Galerías de keypoints (HTML)
-      ├─ 1. Keypoints de transcripción (50 al azar)
-      └─ 2. Keypoints de contexto (50 al azar)
-          └─ 0. Volver
+      ├─ 1. Keypoints de transcripción (50 al azar, file:// portables)
+      ├─ 2. Keypoints de contexto (50 al azar, file:// portables)
+      └─ 0. Volver
 
-9. Ayuda
+7. Scripts temporarios (correcciones puntuales)
+  └─ 1. Corregir timestamps 360 (CreateDate UTC→ART, --reubicar, --dry-run)
+
+9. Ayuda (2 hojas: comandos básicos / avanzados)
 ```
 
 Todas las operaciones que modifican la DB preguntan el modo
@@ -294,6 +305,8 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/inferir_hora_textos.py` | Infiere timestamp de textos `type='text'` interpolando su posición contra el track GPX (posición → tiempo, `--umbral`) | Enriquecimiento |
 | `scripts/diagnosticar_camaras_360.py` | Diagnostica relojes de cámaras Insta360 en videos 360°: identifica cámara A/B (bitrate+fps), deduce hora real (embebido=UTC−3h), flaggea relojes reconfigurados (solo lectura, NO escribe en DB; ver `docs/discrepancia_horarios_camaras.md`) | Diagnóstico |
 | `scripts/ubicar_videos_gpx.py` | Ubica videos 360° interpolando su intervalo temporal contra el track GPX (colapsa momentos detenidos, muestreo `--intervalo` s): lat/lon/alt inicial + keypoints `ubicacion_video` por tramo + sentinels `ubicacion_video_estado`/`ubicacion_video_gaps` (NO TUI) | Enriquecimiento |
+| `scripts/corregir_timestamp_360.py` | Corrige timestamps 360° Insta360 post-ingesta (CreateDate UTC→ART, --reubicar, --dry-run, --json) — temporario, TUI 7→1 | Mantenimiento |
+| `scripts/generar_galeria_keypoints.py` | Galerías HTML de keypoints al azar (transcripción/contexto): player + mapa + slideshow 10 fotos cercanas, `file://` portables (TUI 6→4) | Visualización |
 | `scripts/exportar_visualizacion.py` | Exporta snapshot de la DB → visualizacion.db; deploy genérico a deploy/ (por defecto) con copia de medios y transcode web | Visualización |
 | `scripts/ingest_textos.py` | Ingiere textos `.md` de `textos/` como medios type='text' (frontmatter + subtítulos `##` = textos individuales) | Ingesta |
 | `scripts/fix_gps_sign.py` | Corrección de signo GPS (herramienta de mantenimiento) | Mantenimiento |
@@ -742,6 +755,8 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 | `docs/inferencia_autor.md` | Inferencia de autor desde EXIF/carpeta |
 | `docs/armado_de_tandas.md` | Estrategias de armado de tandas y limpieza |
 | `docs/plan_keywords.md` | Plan de calidad de keywords (5 exactas, refinar v2, sonido/video, nube unificada) |
+| `docs/correccion_timestamp_360.md` | Corrección de timestamps 360° Insta360 post-ingesta (CreateDate UTC→ART, --reubicar) |
+| `docs/revision_pre_presentacion.md` | Auditoría B1 race, M1-M2, D1-D5, L1-L7 pre-presentación |
 | `docs/ideas_externas.md` | Ideas de terceros para la instalación |
 
 ---
@@ -795,7 +810,9 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 │   ├── ingest_textos.py       # Ingesta de textos .md como medios type='text'
 │   ├── inferir_hora_textos.py # Timestamp de textos interpolando track GPX
 │   ├── diagnosticar_camaras_360.py # Diagnóstico de relojes Insta360 (solo lectura)
+│   ├── corregir_timestamp_360.py # Corrige timestamps 360° Insta360 (UTC→ART, --reubicar)
 │   ├── ubicar_videos_gpx.py   # Ubica videos 360° por interpolación GPX
+│   ├── generar_galeria_keypoints.py # Galerías HTML de keypoints (TUI 6→4)
 │   ├── keypoints_contexto.py  # Keypoints de contexto (devenir geográfico)
 │   ├── detectar_contenedores.py  # Auditoría de contenedores (ffprobe)
 │   ├── repetir_contenido.py   # Contenido repetido por audio

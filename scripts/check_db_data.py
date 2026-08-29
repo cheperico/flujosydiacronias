@@ -14,8 +14,12 @@ import sqlite3
 import sys
 
 if sys.platform == "win32":
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    # Reconfigure en el lugar (idempotente, no cierra el buffer si ya hay wrapper).
+    # Evita el bug "I/O operation on closed file" al importarse desde flujos.py.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def _resolver_db(db_path: str | None) -> str:

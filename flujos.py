@@ -28,9 +28,16 @@ import subprocess
 import sys
 from typing import Callable
 
-# Forzar UTF-8 en consola Windows para poder usar caracteres Unicode
+# Forzar UTF-8 en consola Windows para poder usar caracteres Unicode.
+# reconfigurar in-place: no reasigna sys.stdout ni toma posesión del buffer,
+# evita que módulos importados (ej: check_db_data) rompan el flujo con
+# "I/O operation on closed file" al re-empaquetar el mismo buffer.
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        # Fallback: reemplazo directo (sin double-wrap posterior)
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Asegurar que scripts/ este en el path para imports relativos
 _scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
@@ -70,86 +77,129 @@ COMANDOS:
   relocate    Actualizar rutas absolutas cuando los archivos se mudan.
               Ej: python flujos.py relocate --new-root E:/Medios
 
-  check-db    Mostrar todos los registros de la base de datos.
+   check-db    Mostrar resumen de la DB (totales, salud, batches, GPS, signo).
+               Opciones: --db RUTA --verbose/-v --limit N
+               Ej: python flujos.py check-db --verbose
 
-  check-gps   Revisar que archivos tienen GPS en el sistema de archivos.
+   check-gps   Revisar que archivos tienen GPS (via ExifTool).
+               Opciones: --db RUTA --exiftool RUTA --samples N --folder CARPETA
+               Ej: python flujos.py check-gps --folder D:/Fotos --samples 10
 
-  geocode     Geocodificar coordenadas GPS (lat,lon) a provincia/localidad
-              usando la API Georef Argentina (batch).
-              Ej: python flujos.py geocode --limit 100
+   check-data  Stats de clima/dia/geocode (weather, dia_semana, municipio).
+   (alias:      Opciones: --db RUTA --limit N
+    check-clima, Ej: python flujos.py check-data --limit 20
+    check-geo)
 
-  gradient    Calcular gradientes de ruta entre puntos GPS consecutivos.
-              Calcula distancia, pendiente y esfuerzo fisico acumulado.
-              Ej: python flujos.py gradient --dry-run --verbose
+   geocode     Geocodificar coordenadas GPS (lat,lon) a provincia/localidad
+               usando la API Georef Argentina (batch).
+               Opciones: --db RUTA --limit N --mode skip|update|replace --dry-run
+                         --coords LAT,LON
+               Ej: python flujos.py geocode --limit 100 --mode update
 
-  astronomia  Calcular posicion del sol y clasificar twilight (NOAA).
-              Calcula elevacion, azimut y momento del dia para cada
-              registro con GPS + timestamp.
-              Ej: python flujos.py astronomia --dry-run --verbose
+   gradient    Calcular gradientes de ruta entre puntos GPS consecutivos.
+               Calcula distancia, pendiente y esfuerzo fisico acumulado.
+               Opciones: --db RUTA --mode skip|update|replace --dry-run
+                         --verbose/-v --quiet/-q
+               Ej: python flujos.py gradient --mode update --verbose
 
-  undo-ingest       Deshacer una ingesta por batch ID.
+   astronomia  Calcular posicion del sol y clasificar twilight (NOAA).
+               Calcula elevacion, azimut y momento del dia para cada
+               registro con GPS + timestamp.
+               Opciones: --db RUTA --mode skip|update|replace --dry-run --verbose/-v
+               Ej: python flujos.py astronomia --mode update --verbose
 
-  backfill-end-time Calcular end_time para registros existentes
-                    que no lo tengan (migracion).
+   undo-ingest       Deshacer una ingesta por batch ID (alias: undo).
+   (alias: undo)
 
-  improve-db        Ejecutar pasos de mejora sobre la DB (colores,
-                    keywords, transcripcion, keypoints, timestamps, GPS).
+   backfill-end-time Calcular end_time para registros existentes
+   (alias:           que no lo tengan (migracion).
+    backfill)
 
-  analizar-video    Analizar videos con IA: scene detection + muestreo por
-                    escena + keywords (minicpm-v4.6).
-                    Ej: python flujos.py analizar-video --dry-run
+   improve-db        Ejecutar pasos de mejora sobre la DB (9 pasos: colors,
+                     keywords, descriptions, combinado, transcribe, keypoints,
+                     timestamps, gps, video_metadata).
+                     Opciones: --steps X,Y --mode skip|update|replace --db RUTA
+                               --list --no-mostrar --workers N
+                     Ej: python flujos.py improve-db --steps keywords --mode update
 
-  keypoints-contexto Keypoints de contexto (devenir geografico) contra los
-                    tracks GPX: elevacion, astronomia, movimiento, ubicacion
-                    y clima en media_keypoints.
-                    Ej: python flujos.py keypoints-contexto --dry-run
+   analizar-video    Analizar videos con IA: scene detection + muestreo por
+   (alias: analizar)  escena + keywords (minicpm-v4.6).
+                     Opciones: --file RUTA --db RUTA --folder CARPETA --modelo MODELO --por-escena N --mejores-por-escena N
+                               --max-duracion-escena S --sensibilidad 0-1 --no-proxy --dry-run --limit N --json
+                     Ej: python flujos.py analizar-video --dry-run
 
-  mapa              Generar un mapa HTML interactivo con Folium
-                    a partir del track GPX y los GPS de la BD.
-                    Ej: python flujos.py mapa --road-colors
+   keypoints-contexto Keypoints de contexto (devenir geografico) contra los
+   (alias: keypoints)tracks GPX: elevacion, astronomia, movimiento, ubicacion
+                     y clima en media_keypoints.
+                     Opciones: --db RUTA --mode skip|update|replace --intervalo 30 --frecuencia-gruesa 300 --umbral-* --dry-run --cache/--no-cache
+                     Ej: python flujos.py keypoints-contexto --mode update --dry-run
 
-  mapa-municipios   Genera un mapa HTML por municipio recorrido, con variantes
-                    (ruta, puntos, contexto, gradiente). Nombre:
-                    mapa_municipio_<municipio>_<variante>.html (sin acentos:
-                    'Río Hondo' -> 'Rio_Hondo')
-                    Ej: python flujos.py mapa-municipios --variantes ruta,puntos
+   mapa              Generar un mapa HTML interactivo con Folium
+                     a partir del track GPX y los GPS de la BD.
+                     Opciones: --output/-o RUTA --db RUTA --no-markers --road-colors --tolerancia-metros 1000 --umbral-gap-aviso 1800 --assets-cache DIR
+                     Ej: python flujos.py mapa --road-colors --tolerancia-metros 500
 
-  export-csv        Exporta todas las tablas de la DB a archivos CSV.
-                    Ej: python flujos.py export-csv
-                    Ej: python flujos.py export-csv --table media
-                    Ej: python flujos.py export-csv --output ./mis_exports
+   mapa-municipios   Genera un mapa HTML por municipio recorrido, con variantes
+   (alias: mapas)    (ruta, puntos, contexto, gradiente). Nombre:
+                     mapa_municipio_<municipio>_<variante>.html (sin acentos:
+                     'Río Hondo' -> 'Rio_Hondo')
+                     Opciones: --output/-o DIR --db RUTA --variantes LISTA --municipio SUBSTR --mode skip|update --dry-run
+                               --tolerancia-metros 1000 --umbral-gap-aviso 1800 --no-embebido --zooms LISTA --tiles-cache DIR --assets-cache DIR
+                     Ej: python flujos.py mapa-municipios --variantes ruta,puntos --mode update
 
-  reset-db          Hace backup de la DB actual y crea una nueva
-                     desde cero (schema limpio).
+   export-csv        Exporta todas las tablas de la DB a archivos CSV (alias: csv).
+   (alias: csv)      Opciones: --db RUTA --table TABLA --output DIR --list-tables --dry-run
+                     Ej: python flujos.py export-csv --table media
+                     Ej: python flujos.py csv --output ./mis_exports
 
-  backup-db         Solo backup (sin borrar): copia la DB actual con timestamp.
+   reset-db          Hace backup de la DB actual y crea una nueva
+   (alias: reset)     desde cero (schema limpio).
 
-  restore-db        Restaura la DB desde un backup previo.
+   backup-db         Solo backup (sin borrar): copia la DB actual con timestamp.
+   (alias: backup)
 
-  import-telegram  Importar un export de Telegram (chats, mensajes, multimedia).
-                   Ej: python flujos.py import-telegram -e RUTA_AL_EXPORT
+   restore-db        Restaura la DB desde un backup previo.
+   (alias: restore)
 
-  ingest-textos    Ingerir textos .md de la carpeta textos/ como medios type='text'.
-                   Ej: python flujos.py ingest-textos
+   import-telegram  Importar un export de Telegram (chats, mensajes, multimedia).
+   (alias: tg)       Opciones: -e/--export-path RUTA --mode skip|update|replace
+                    --include-system/--no-system --ingest-media/--no-ingest --dry-run --db RUTA
+                    Ej: python flujos.py import-telegram -e RUTA_AL_EXPORT --mode update
 
-  ingest-gpx       Ingerir un archivo GPX (tracks/waypoints + backfill altitud).
-                   Ej: python flujos.py ingest-gpx --gpx tracks/ruta.gpx
+   ingest-textos    Ingerir textos .md de la carpeta textos/ como medios type='text' (alias: textos).
+   (alias: textos)   Opciones: --root CARPETA --db RUTA --mode skip|update|replace --dry-run
+                    Ej: python flujos.py ingest-textos --mode update
 
-  mover            Mover o copiar archivos a nueva ubicacion y actualizar DB.
-                   Ej: python flujos.py mover --new-root NUEVA_RAIZ --mode mover
+   ingest-gpx       Ingerir un archivo GPX (tracks/waypoints + backfill altitud) (alias: gpx).
+   (alias: gpx)      Opciones: --gpx RUTA --db RUTA --mode skip|update|replace --dry-run
+                    --no-altitude --no-waypoints
+                    Ej: python flujos.py ingest-gpx --gpx tracks/ruta.gpx
 
-  detectar-contenedores  Auditar contenedores de video/audio con ffprobe
-                   (streams faltantes, estado por medio).
-                   Ej: python flujos.py detectar-contenedores --dry-run
+   corregir-360     Corregir timestamps de videos 360° Insta360 post-ingesta
+   (alias:           (CreateDate UTC -> ART, gap del track). Temporario, borrar al estabilizar.
+    corregir360)     Opciones: --db RUTA --mode skip|update|replace --dry-run --reubicar --json --verbose/-v
+                    Ej: python flujos.py corregir-360 --mode update --reubicar --dry-run
 
-  limpiar-descripciones  Limpiar descripciones con eco del prompt (meta-intros).
-                   Ej: python flujos.py limpiar-descripciones --dry-run
+   mover            Mover o copiar archivos a nueva ubicacion y actualizar DB.
+   (alias: mover)    Opciones: --new-root RUTA --old-root RUTA --mode mover|copiar --update-db --dry-run --db RUTA
+                    Ej: python flujos.py mover --new-root NUEVA_RAIZ --mode mover
 
-  repetir-contenido      Buscar contenido repetido por coincidencias de audio.
-                   Ej: python flujos.py repetir-contenido --contra C:/audio.mp3
+   detectar-contenedores  Auditar contenedores de video/audio con ffprobe (alias: contenedores)
+   (alias:           (streams faltantes, estado por medio).
+    contenedores)    Opciones: --db RUTA --mode skip|update|replace --type TIPO --ffprobe RUTA --dry-run --verbose
+                    Ej: python flujos.py detectar-contenedores --mode update --dry-run
 
-  audio-frame      Correlacionar contenido de audio con frames de video.
-                   Ej: python flujos.py audio-frame --archivo C:/video.mp4
+   limpiar-descripciones  Limpiar descripciones con eco del prompt (meta-intros) (alias: descripciones).
+   (alias:           Opciones: --db RUTA --mode skip|update|replace --dry-run --solo-en --solo-es --verbose --no-backup
+    descripciones)  Ej: python flujos.py limpiar-descripciones --mode update
+
+   repetir-contenido      Buscar contenido repetido por coincidencias de audio (alias: repetidos).
+   (alias: repetidos)Opciones: --db RUTA --contra RUTA --limite N --umbral 0.80 --min-duracion-segs 4 --top 20 --json --verbose
+                    Ej: python flujos.py repetir-contenido --contra C:/audio.mp3 --top 20
+
+   audio-frame      Correlacionar contenido de audio con frames de video (alias: crossref).
+   (alias: crossref) Opciones: --db RUTA --archivo RUTA --media-id ID --top-k N --umbral 0.80 --cada-segundos N --frames-dir DIR --modelo CED --json
+                    Ej: python flujos.py audio-frame --archivo C:/video.mp4
 
   --tui       Menu interactivo (tambien sin argumentos).
 
@@ -2400,18 +2450,20 @@ def opcion_ayuda():
     def _ayuda_improve_db(_db):
         limpiar_pantalla()
         print("============ IMPROVE-DB ============\n")
-        print("  Ejecuta pasos de mejora sobre la base de datos.")
-        print("  Uso: python flujos.py improve-db [--steps X,Y] [--mode skip|update|replace]\n")
+        print("  Ejecuta pasos de mejora sobre la base de datos (9 pasos).")
+        print("  Uso: python flujos.py improve-db [--steps X,Y] [--mode skip|update|replace] [--db RUTA] [--no-mostrar] [--workers N]\n")
         print("  Pasos disponibles:")
         print("    colors        Extraer colores dominantes")
         print("    keywords      Etiquetar con IA")
         print("    descriptions  Describir con IA")
+        print("    combinado     Keywords + descripcion en 1 llamada")
         print("    transcribe    Transcribir audios/videos")
         print("    keypoints     Poblar keypoints desde transcripciones")
         print("    timestamps    Inferir timestamps faltantes")
         print("    gps           Inferir GPS")
+        print("    video_metadata Metadatos de video (camara, 360, author)")
         print()
-        print("  --list  para listar todos los pasos.")
+        print("  Flags: --list / --all  para listar pasos; --workers N (default 1).")
         pausa()
 
     def _ayuda_geocode(_db):
@@ -2419,9 +2471,9 @@ def opcion_ayuda():
         print("============ GEOCODE ============\n")
         print("  Geocodifica coordenadas GPS (lat,lon) a provincia/localidad")
         print("  usando la API Georef Argentina (batch).\n")
-        print("  Uso: python flujos.py geocode [--limit N] [--dry-run]\n")
+        print("  Uso: python flujos.py geocode [--limit N] [--mode skip|update|replace] [--dry-run] [--coords LAT,LON] [--db RUTA]\n")
         print("  Tambien desde consola:")
-        print("    python scripts/geocode.py --coords -34.6037,-58.3816")
+        print("    python scripts/geocode.py --coords -34.6037,-58.3816 --mode update")
         pausa()
 
     def _ayuda_gradient(_db):
@@ -2435,9 +2487,9 @@ def opcion_ayuda():
         print("    gradient_pct            Pendiente porcentual")
         print("    cumul_distance_m        Distancia acumulada (m)")
         print("    cumul_elevation_gain_m  Ganancia elevacion acumulada (m)\n")
-        print("  Uso: python flujos.py gradient [--dry-run] [--verbose]\n")
+        print("  Uso: python flujos.py gradient [--mode skip|update|replace] [--dry-run] [--verbose/-v] [--quiet/-q] [--db RUTA]\n")
         print("  Tambien desde consola:")
-        print("    python scripts/gradiente.py --dry-run --verbose")
+        print("    python scripts/gradiente.py --mode update --dry-run --verbose")
         pausa()
 
     def _ayuda_astronomia(_db):
@@ -2451,7 +2503,7 @@ def opcion_ayuda():
         print("    sun_distance_au    Distancia al sol en UA")
         print("    twilight_period    Clasificación: día, golden_hour, blue_hour,")
         print("                       crepúsculo civil/naútico/astronómico, noche\n")
-        print("  Uso: python flujos.py astronomia [--dry-run] [--verbose]\n")
+        print("  Uso: python flujos.py astronomia [--mode skip|update|replace] [--dry-run] [--verbose/-v] [--db RUTA]\n")
         print("  Requiere: latitude, longitude y timestamp_utc en la DB.")
         print("  Algoritmo: NOAA Solar Calculator (Python puro, 0 dependencias)\n")
         print("  Precision: ~0.01°\n")
@@ -2460,25 +2512,44 @@ def opcion_ayuda():
     def _ayuda_check(_db):
         limpiar_pantalla()
         print("============ CHECK-DB ============\n")
-        print("  Inspecciona todos los registros de la base de datos.")
-        print("  Uso: python flujos.py check-db\n")
+        print("  Inspecciona la base de datos (resumen por tipo/tablas, batches, GPS).")
+        print("  Uso: python flujos.py check-db [--db RUTA] [--verbose/-v] [--limit N]\n")
+        print("  Alias: check-data / check-clima / check-geo (stats clima/dia/geocode)")
+        print("    Uso: python flujos.py check-data [--db RUTA] [--limit N]\n")
         print("============ CHECK-GPS ============\n")
-        print("  Revisa que archivos tienen GPS en el sistema de archivos.")
-        print("  Uso: python flujos.py check-gps\n")
-        print("  Para un analisis completo: python scripts/check_gps.py")
+        print("  Revisa que archivos tienen GPS (via ExifTool).")
+        print("  Uso: python flujos.py check-gps [--db RUTA] [--exiftool RUTA] [--samples N] [--folder CARPETA]\n")
+        print("  Para un analisis completo: python scripts/check_gps.py --folder D:/Fotos")
         pausa()
 
-    _menu("AYUDA", {
-        "1": ("Ayuda general", _ayuda_general),
-        "2": ("ingest  - Ingestion de medios", _ayuda_ingest),
-        "3": ("query   - Consultas a la base de datos", _ayuda_query),
-        "4": ("relocate - Relocalizar medios", _ayuda_relocate),
-        "5": ("improve-db - Mejorar base de datos", _ayuda_improve_db),
-        "6": ("geocode - Geocodificar coordenadas GPS", _ayuda_geocode),
-        "7": ("gradient - Calcular gradientes de ruta", _ayuda_gradient),
-        "8": ("astronomia - Posición del sol y twilight", _ayuda_astronomia),
-        "9": ("check-db / check-gps", _ayuda_check),
-    }, intro="  Elija un comando para ver su ayuda detallada:", titulo_ancho=12)
+    def _ayuda_corregir360(_db):
+        limpiar_pantalla()
+        print("============ CORREGIR-360 ============\n")
+        print("  Corrige timestamps de videos 360° Insta360 post-ingesta.")
+        print("  Insta360 guarda CreateDate en UTC; ingest lo trato como ART (-3).")
+        print("  Corrige a timestamp_utc real y opcionalmente reubica en GPX.\n")
+        print("  Uso: python flujos.py corregir-360 [--mode skip|update|replace] [--dry-run] [--reubicar] [--json] [--verbose/-v] [--db RUTA]\n")
+        print("  Tambien desde consola:")
+        print("    python scripts/corregir_timestamp_360.py --mode update --reubicar --dry-run")
+        print("  Docs: docs/correccion_timestamp_360.md")
+        pausa()
+
+    _menu_paginado("AYUDA", [
+        ("Comandos basicos (1/2)\n", {
+            "1": ("Ayuda general", _ayuda_general),
+            "2": ("ingest  - Ingestion de medios", _ayuda_ingest),
+            "3": ("query   - Consultas a la base de datos", _ayuda_query),
+            "4": ("relocate - Relocalizar medios", _ayuda_relocate),
+            "5": ("improve-db - Mejorar base de datos", _ayuda_improve_db),
+            "6": ("geocode - Geocodificar coordenadas GPS", _ayuda_geocode),
+        }),
+        ("Comandos avanzados (2/2)\n", {
+            "1": ("gradient - Calcular gradientes de ruta", _ayuda_gradient),
+            "2": ("astronomia - Posicion del sol y twilight", _ayuda_astronomia),
+            "3": ("check-db / check-gps / check-data", _ayuda_check),
+            "4": ("corregir-360 - Corregir timestamps 360", _ayuda_corregir360),
+        }),
+    ])
 
 
 def tui():

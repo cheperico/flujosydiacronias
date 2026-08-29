@@ -466,7 +466,8 @@ def main(argv: list[str] | None = None) -> None:
             'dia_semana', 'weather_label', 'ia_description',
             'whisper_segments', 'ia_keywords', 'texto_completo',
             'titulo_seccion', 'ia_keywords_texto',
-            'ia_keywords_transcripcion', 'ia_keywords_sonido'
+            'ia_keywords_transcripcion', 'ia_keywords_sonido',
+            'ia_keywords_video'
         )
     """)
     for r in cur:
@@ -667,6 +668,7 @@ def main(argv: list[str] | None = None) -> None:
             keywords = unir_keywords(m.get('ia_keywords_sonido'), m.get('ia_keywords_transcripcion'))
         elif r['type'] == 'video':
             keywords = unir_keywords(
+                m.get('ia_keywords_video'),
                 m.get('ia_keywords'),
                 m.get('ia_keywords_transcripcion'),
                 m.get('ia_keywords_sonido'),
