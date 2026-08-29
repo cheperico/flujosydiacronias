@@ -160,11 +160,12 @@ def check_keypoints(conn) -> dict:
             WHERE mm.media_id = m.id AND mm.key = 'whisper_segments'
         )
     """).fetchone()[0]
-    # De esos, cuántos ya tienen keypoints
+    # De esos, cuántos ya tienen keypoints de transcripción
     con_kp = conn.execute("""
-        SELECT COUNT(DISTINCT media_id) FROM media_keypoints
+        SELECT COUNT(DISTINCT media_id) FROM media_keypoints WHERE key = 'transcription'
     """).fetchone()[0]
-    return {"total": transcritos, "pendientes": transcritos - con_kp, "hecho": con_kp}
+    pendientes = max(0, transcritos - con_kp)
+    return {"total": transcritos, "pendientes": pendientes, "hecho": con_kp}
 
 
 def check_timestamps(conn) -> dict:
@@ -1001,7 +1002,14 @@ def run_keypoints(conn, db_path, mode, stats):
     rows = conn.execute(query).fetchall()
 
     if not rows:
-        log.info("  No hay transcripciones pendientes para keypoints.")
+        # Distinguir: sin transcripciones vs todo ya con keypoints
+        total_transcritos = conn.execute(
+            "SELECT COUNT(*) FROM media m WHERE EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id = m.id AND mm.key = 'whisper_segments')"
+        ).fetchone()[0]
+        if total_transcritos == 0:
+            log.warning("  No hay transcripciones (whisper_segments) — ejecutá 3.8 Transcripción primero.")
+        else:
+            log.info("  No hay transcripciones pendientes para keypoints.")
         return
 
     inserted = 0
@@ -1415,7 +1423,7 @@ REGISTRY = {
     },
     "keypoints": {
         "description": "Poblar media_keypoints desde transcripciones",
-        "dependencies": ["transcribe"],
+        "dependencies": [],
         "check": check_keypoints,
         "run": run_keypoints,
     },
