@@ -26,7 +26,7 @@ import sys
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.util import abrir, resolver_db
+from db.util import abrir, resolver_db, normalizar_ruta, sidecar_abs, calcular_nueva_ruta
 
 
 def get_ingest_root(conn) -> str | None:
@@ -37,19 +37,13 @@ def get_ingest_root(conn) -> str | None:
 
 
 def normalize_path(p: str) -> str:
-    """Normaliza separadores y elimina slash final."""
-    p = os.path.normpath(p)
-    # Sacar trailing separator si existe
-    if len(p) > 2 and p.endswith(os.sep):
-        p = p[:-1]
-    return p
+    """Normaliza separadores y elimina slash final (delegado a db.util)."""
+    return normalizar_ruta(p)
 
 
 def _sidecar_abs(sc_rel: str, old_root: str) -> str:
-    """Convierte sidecar_xml (relativo a ingest_root) a ruta absoluta."""
-    if os.path.isabs(sc_rel):
-        return sc_rel
-    return os.path.normpath(os.path.join(old_root, sc_rel))
+    """Convierte sidecar_xml (relativo a ingest_root) a ruta absoluta (delegado a db.util)."""
+    return sidecar_abs(sc_rel, old_root)
 
 
 def preview_changes(conn, old_root: str, new_root: str):
@@ -66,7 +60,7 @@ def preview_changes(conn, old_root: str, new_root: str):
     for row in rows:
         mid, fname, abs_path, rel_path = row
         if abs_path.startswith(old_norm):
-            new_abs = abs_path.replace(old_norm, new_norm, 1)
+            new_abs = calcular_nueva_ruta(abs_path, old_norm, new_norm)
             print(f"  #{mid} {fname}")
             print(f"    {abs_path}")
             print(f"    -> {new_abs}")
@@ -84,7 +78,7 @@ def preview_changes(conn, old_root: str, new_root: str):
         mid, fname, sc_rel = row
         sc_abs = _sidecar_abs(sc_rel, old_norm)
         if sc_abs.startswith(old_norm):
-            new_sc_abs = sc_abs.replace(old_norm, new_norm, 1)
+            new_sc_abs = calcular_nueva_ruta(sc_abs, old_norm, new_norm)
             # Guardar como relativo al nuevo root (mismo criterio que ingest.py)
             new_sc_rel = os.path.relpath(new_sc_abs, new_norm)
             print(f"  #{mid} {fname} [sidecar]")
@@ -127,7 +121,7 @@ def apply_changes(conn, old_root: str, new_root: str):
     for mid, sc_rel in sidecar_rows:
         sc_abs = _sidecar_abs(sc_rel, old_norm)
         if sc_abs.startswith(old_norm):
-            new_sc_abs = sc_abs.replace(old_norm, new_norm, 1)
+            new_sc_abs = calcular_nueva_ruta(sc_abs, old_norm, new_norm)
             new_sc_rel = os.path.relpath(new_sc_abs, new_norm)
             conn.execute(
                 "UPDATE media SET sidecar_xml = ?, updated_at = datetime('now') WHERE id = ?",
@@ -215,6 +209,32 @@ def main(argv=None):
     if args.dry_run:
         preview_changes(conn, old_root, new_root)
     else:
+        # Backup automático antes de tocar DB
+        conn.commit()
+        conn.close()
+        # Reabrir para backup WAL-safe via utilidad local
+        try:
+            import sqlite3
+            from datetime import datetime
+            backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = os.path.join(backup_dir, f"flujos_{ts}__autobackup.db")
+            src = sqlite3.connect(db_path)
+            try:
+                src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            dst = sqlite3.connect(backup_path)
+            try:
+                src.backup(dst)
+                print(f"  ✓ Backup automático: {os.path.basename(backup_path)}")
+            finally:
+                dst.close()
+            src.close()
+        except Exception as e:
+            print(f"  ⚠ No se pudo crear backup automático: {e}")
+        conn = abrir(db_path)
         cambios, cambios_sc = apply_changes(conn, old_root, new_root)
         print(f"Actualizadas {cambios} rutas absolutas y {cambios_sc} sidecars.")
         print(f"ingest_root actualizado a: {new_root}")

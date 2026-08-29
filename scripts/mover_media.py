@@ -33,7 +33,7 @@ import sqlite3
 import sys
 from datetime import datetime
 
-from db.util import abrir, resolver_db
+from db.util import abrir, resolver_db, normalizar_ruta as _norm_util, calcular_nueva_ruta as _calc_util, sidecar_abs as _sidecar_util
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,11 +50,8 @@ SIDECAR_EXTS = [".AAE", ".aae", ".json", ".xml", ".XMP", ".xmp"]
 
 
 def normalizar_ruta(p: str) -> str:
-    """Normaliza separadores y elimina barra final."""
-    p = os.path.normpath(p)
-    if len(p) > 2 and p.endswith(os.sep):
-        p = p[:-1]
-    return p
+    """Normaliza separadores y elimina barra final (DRY: db.util)."""
+    return _norm_util(p)
 
 
 def obtener_medios(conn) -> list[tuple[int, str, str]]:
@@ -76,11 +73,8 @@ def obtener_sidecars(conn) -> list[tuple[int, str]]:
 
 
 def calcular_nueva_ruta(abs_path: str, old_root: str, new_root: str) -> str:
-    """Calcula la nueva ruta absoluta reemplazando old_root por new_root."""
-    old_norm = normalizar_ruta(old_root)
-    if abs_path.startswith(old_norm):
-        return abs_path.replace(old_norm, new_root, 1)
-    return abs_path
+    """Calcula la nueva ruta absoluta reemplazando SOLO prefijo old_root por new_root (DRY: db.util)."""
+    return _calc_util(abs_path, old_root, new_root)
 
 
 def calcular_nuevo_relativo(abs_path: str, new_root: str) -> str:
@@ -120,7 +114,7 @@ def previsualizar_movimiento(
     for mid, sc_rel in sidecars:
         sc_abs = os.path.normpath(os.path.join(old_norm, sc_rel))
         if sc_abs.startswith(old_norm):
-            nueva_sc_abs = sc_abs.replace(old_norm, new_norm, 1)
+            nueva_sc_abs = _calc_util(sc_abs, old_norm, new_norm)
             nueva_sc_rel = os.path.relpath(nueva_sc_abs, new_norm)
             cambios.append(
                 {
@@ -243,7 +237,7 @@ def ejecutar_movimiento(conn, old_root: str, new_root: str) -> dict:
             if sc_rel_actual and sc_rel_actual[0]:
                 sc_abs_old = os.path.normpath(os.path.join(old_norm, sc_rel_actual[0]))
                 if sc_abs_old.startswith(old_norm) and os.path.isfile(sc_abs_old):
-                    sc_nueva_abs = sc_abs_old.replace(old_norm, new_norm, 1)
+                    sc_nueva_abs = _calc_util(sc_abs_old, old_norm, new_norm)
                     sc_nueva_rel = os.path.relpath(sc_nueva_abs, new_norm)
                     conn.execute(
                         "UPDATE media SET sidecar_xml = ?, updated_at = datetime('now') WHERE id = ?",
@@ -361,7 +355,7 @@ def ejecutar_copia(
                 if sc_rel_actual and sc_rel_actual[0]:
                     sc_abs_old = os.path.normpath(os.path.join(old_norm, sc_rel_actual[0]))
                     if sc_abs_old.startswith(old_norm) and os.path.isfile(sc_abs_old):
-                        sc_nueva_abs = sc_abs_old.replace(old_norm, new_norm, 1)
+                        sc_nueva_abs = _calc_util(sc_abs_old, old_norm, new_norm)
                         sc_nueva_rel = os.path.relpath(sc_nueva_abs, new_norm)
                         conn.execute(
                             "UPDATE media SET sidecar_xml = ?, updated_at = datetime('now') WHERE id = ?",
@@ -450,6 +444,37 @@ def procesar(
             )
         conn.close()
         return
+
+    # Backup automático antes de tocar FS/DB (si no es dry_run y va a modificar DB)
+    if not dry_run and (mode == "mover" or update_db):
+        try:
+            conn.commit()
+            conn.close()
+            import sqlite3 as _sq
+            from datetime import datetime as _dt
+            _bdir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
+            os.makedirs(_bdir, exist_ok=True)
+            _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            _bpath = os.path.join(_bdir, f"flujos_{_ts}__autobackup.db")
+            _src = _sq.connect(db_path)
+            try:
+                _src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            _dst = _sq.connect(_bpath)
+            try:
+                _src.backup(_dst)
+                log.info("  ✓ Backup automático: %s", os.path.basename(_bpath))
+            finally:
+                _dst.close()
+            _src.close()
+            conn = abrir(db_path)
+        except Exception as e:
+            log.warning("  ⚠ No se pudo crear backup automático: %s", e)
+            try:
+                conn = abrir(db_path)
+            except Exception:
+                pass
 
     if mode == "mover":
         log.info("=== MOVIENDO ARCHIVOS ===")

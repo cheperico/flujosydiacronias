@@ -15,22 +15,22 @@ import os
 import sys
 
 
-def print_media(conn, verbose: bool):
-    """Muestra los registros de media."""
-    print("=== MEDIA ===")
+def print_media(conn, verbose: bool, limit: int = 40):
+    """Muestra los registros de media (paginado, streaming)."""
+    print(f"=== MEDIA (primeros {limit}) ===")
     if verbose:
         cols = ["id", "filename_original", "type", "subtype", "carpeta",
                 "timestamp_utc", "duration_secs", "end_time",
                 "latitude", "longitude", "author",
                 "color_1_name_basic", "ingest_batch_id"]
-        query = f"SELECT {', '.join(cols)} FROM media ORDER BY id"
+        query = f"SELECT {', '.join(cols)} FROM media ORDER BY id LIMIT ?"
     else:
         query = """
             SELECT id, filename_original, type, sidecar_parsed,
                    timestamp_utc, timezone_note
-            FROM media ORDER BY id
+            FROM media ORDER BY id LIMIT ?
         """
-    cursor = conn.execute(query)
+    cursor = conn.execute(query, (limit,))
     rows = cursor.fetchall()
     if not rows:
         print("  (vacío)")
@@ -42,6 +42,13 @@ def print_media(conn, verbose: bool):
         else:
             ts = row[4] or "-"
             print(f"  id={row[0]:6d} | {row[1]:35s} | {row[2]:6s} | ts_utc={ts}")
+    # Avisar si hay más
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+        if total > limit:
+            print(f"  ... ({total - limit} más, use --limit {total} para ver todos)")
+    except Exception:
+        pass
 
 
 def print_metadata(conn, limit: int = 40):
@@ -85,9 +92,29 @@ def print_keypoints(conn, limit: int = 20):
 
 
 def print_totals(conn):
-    """Muestra totales por tabla."""
+    """Muestra totales por tabla (DRY: db.util.obtener_resumen)."""
     print()
     print("=== TOTALES ===")
+    try:
+        from db.util import obtener_resumen
+        resumen = obtener_resumen(conn)
+        for table, cnt in resumen.items():
+            if cnt >= 0:
+                print(f"  {table:20s} {cnt:>8d}")
+            else:
+                print(f"  {table:20s}   (no existe)")
+        # Mostrar también por tipo
+        from db.util import resumen_por_tipo
+        por_tipo = resumen_por_tipo(conn)
+        if por_tipo:
+            print()
+            print("  Por tipo:")
+            for k, v in por_tipo.items():
+                if k != "__total__":
+                    print(f"    {k:<12s} {v:>6d}")
+        return
+    except Exception:
+        pass
     for table in ["media", "media_metadata", "config", "media_keypoints",
                   "media_embeddings", "tracks", "waypoints",
                   "telegram_chats", "telegram_messages", "telegram_media"]:
@@ -126,9 +153,11 @@ def main(argv=None):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    print_media(conn, args.verbose)
-    print_metadata(conn, args.limit)
-    print_keypoints(conn, args.limit)
+    # Clamp limit 1..500
+    lim = max(1, min(int(args.limit) if args.limit else 40, 500))
+    print_media(conn, args.verbose, limit=lim)
+    print_metadata(conn, lim)
+    print_keypoints(conn, lim)
     print_totals(conn)
 
     conn.close()

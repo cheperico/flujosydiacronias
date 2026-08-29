@@ -10,14 +10,17 @@ Uso:
     python scripts/query.py --distinct type
     python scripts/query.py --distinct author --count
 
+    # Valores únicos en tabla alternativa (keypoints, telegram, etc)
+    python scripts/query.py --distinct key --table media_keypoints --count
+
     # Valores únicos de una key en media_metadata
-    python scripts/query.py --key iptc_keywords --count
+    python scripts/query.py --key ia_keywords --count
 
     # Buscar texto en todas las columnas
     python scripts/query.py --search "tucuman"
 
-    # Filtrar por tipo
-    python scripts/query.py --distinct author --count --where "type='image'"
+    # Filtrar por tipo y paginar
+    python scripts/query.py --distinct author --count --where "type='image'" --limit 20
 """
 
 import argparse
@@ -25,7 +28,6 @@ import re
 import sqlite3
 import sys
 import os
-from collections import Counter
 
 # Permitir ejecución standalone: agregar raíz del proyecto al path
 if __name__ == "__main__" and __package__ is None:
@@ -38,21 +40,42 @@ from db.util import abrir, resolver_db
 
 # Palabras prohibidas en --where (previene inyección SQL básica)
 _PROHIBIDO_EN_WHERE = re.compile(
-    r'\b(DROP|ALTER|DELETE|INSERT|UPDATE|CREATE|ATTACH|DETACH|REINDEX|VACUUM)\b',
+    r'\b(DROP|ALTER|DELETE|INSERT|UPDATE|CREATE|ATTACH|DETACH|REINDEX|VACUUM|UNION|EXEC)\b',
     re.IGNORECASE,
 )
 
+# Patrones adicionales peligrosos (comentarios SQL, múltiples statements)
+_PATRON_PELIGROSO = re.compile(r'(--|/\*|\*/|;)')
 
-def _es_columna_valida(conn: sqlite3.Connection, col: str) -> bool:
-    """Verifica que col sea una columna real de la tabla media."""
-    cursor = conn.execute("PRAGMA table_info(media)")
-    columnas = {c["name"] for c in cursor.fetchall()}
-    return col in columnas
+# Tablas permitidas para --table / --distinct
+_TABLAS_PERMITIDAS = {
+    "media", "media_metadata", "media_keypoints", "media_embeddings",
+    "config", "tracks", "waypoints",
+    "telegram_chats", "telegram_messages", "telegram_media",
+}
+
+
+def _es_columna_valida(conn: sqlite3.Connection, col: str, tabla: str = "media") -> bool:
+    """Verifica que col sea una columna real de la tabla indicada."""
+    if tabla not in _TABLAS_PERMITIDAS:
+        return False
+    try:
+        cursor = conn.execute(f"PRAGMA table_info({tabla})")
+        columnas = {c["name"] for c in cursor.fetchall()}
+        return col in columnas
+    except sqlite3.OperationalError:
+        return False
+
+
+def _es_tabla_valida(tabla: str) -> bool:
+    return tabla in _TABLAS_PERMITIDAS
 
 
 def _where_seguro(where: str) -> bool:
-    """Valida que la condición WHERE no contenga comandos destructivos."""
+    """Valida que la condición WHERE no contenga comandos destructivos ni inyección UNION/comments."""
     if _PROHIBIDO_EN_WHERE.search(where):
+        return False
+    if _PATRON_PELIGROSO.search(where):
         return False
     return True
 
@@ -87,26 +110,77 @@ def list_columns(conn):
     else:
         print("  (vacío)")
 
+    print()
+    print("=== Keys en media_keypoints (top 30) ===")
+    try:
+        cursor = conn.execute("""
+            SELECT key, COUNT(*) as total
+            FROM media_keypoints
+            GROUP BY key
+            ORDER BY total DESC
+            LIMIT 30
+        """)
+        rows = cursor.fetchall()
+        if rows:
+            for r in rows:
+                print(f"  {r['key']:<45s} ({r['total']} registros)")
+        else:
+            print("  (vacío)")
+    except sqlite3.OperationalError:
+        print("  (tabla no existe)")
 
-def distinct_column(conn, col: str, count: bool, where: str | None):
-    """Valores únicos de una columna de media."""
+    print()
+    print("=== Tablas disponibles (--table) ===")
+    for t in sorted(_TABLAS_PERMITIDAS):
+        try:
+            cnt = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            print(f"  {t:<22s} {cnt:>6d} filas")
+        except sqlite3.OperationalError:
+            print(f"  {t:<22s} (no existe)")
+
+    print()
+    print("Tip: usa --distinct COL --table TABLA para consultar otras tablas")
+    print("     usa --key KEY para valores de una clave de media_metadata")
+
+
+def distinct_column(conn, col: str, count: bool, where: str | None, tabla: str = "media", limit: int | None = None):
+    """Valores únicos de una columna (soporta cualquier tabla permitida y paginación)."""
+    if not _es_tabla_valida(tabla):
+        print(f"Error: tabla '{tabla}' no permitida. Usa --columns para ver tablas.")
+        return
+    if not _es_columna_valida(conn, col, tabla):
+        print(f"Error: '{col}' no es una columna válida de la tabla '{tabla}'.")
+        print("Usá --columns para ver las columnas disponibles.")
+        return
     if where:
         if not _where_seguro(where):
-            print("Error: la condición --where contiene comandos SQL no permitidos.")
+            print("Error: la condición --where contiene comandos SQL no permitidos (UNION, comentarios o DDL).")
             return
         where_clause = f"WHERE {where}"
     else:
         where_clause = ""
 
+    # Clamp limit
+    limit_clause = ""
+    if limit is not None and limit > 0:
+        limit = max(1, min(int(limit), 500))
+        limit_clause = f"LIMIT {limit}"
+
     if count:
         query = f"""
             SELECT {col} AS val, COUNT(*) as total
-            FROM media
+            FROM {tabla}
             {where_clause}
             GROUP BY {col}
             ORDER BY total DESC
+            {limit_clause}
         """
-        cursor = conn.execute(query)
+        try:
+            cursor = conn.execute(query)
+        except sqlite3.OperationalError as e:
+            print(f"Error SQL: {e}")
+            print("Tip: verificá el --where con --columns")
+            return
         rows = cursor.fetchall()
         total = sum(r["total"] for r in rows)
         sep = "-" * 40
@@ -119,28 +193,39 @@ def distinct_column(conn, col: str, count: bool, where: str | None):
             print(f"  {str(val):<40s} {r['total']:>8d}  {pct:5.1f}%")
         print(f"  {sep} {sep2}")
         print(f"  {'TOTAL':<40s} {total:>8d}")
+        if limit and len(rows) == limit:
+            print(f"  (mostrando top {limit}, puede haber más)")
     else:
         query = f"""
             SELECT DISTINCT {col} AS val
-            FROM media
+            FROM {tabla}
             {where_clause}
             ORDER BY val
+            {limit_clause}
         """
-        cursor = conn.execute(query)
+        try:
+            cursor = conn.execute(query)
+        except sqlite3.OperationalError as e:
+            print(f"Error SQL: {e}")
+            return
         rows = cursor.fetchall()
         for r in rows:
             val = r["val"]
             if val is not None:
                 print(f"  {val}")
-        print(f"  ({len(rows)} valores únicos)")
+        print(f"  ({len(rows)} valores únicos" + (f", límite {limit}" if limit else "") + ")")
 
 
-def distinct_key(conn, key: str, count: bool, where: str | None):
-    """Valores únicos de una key en media_metadata."""
-    if where:
-        where_clause = f"AND ({where})"
-    else:
-        where_clause = ""
+def distinct_key(conn, key: str, count: bool, where: str | None, limit: int | None = None):
+    """Valores únicos de una key en media_metadata (con paginación y WHERE seguro)."""
+    if where and not _where_seguro(where):
+        print("Error: la condición --where contiene comandos SQL no permitidos.")
+        return
+    where_clause = f"AND ({where})" if where else ""
+    limit_clause = ""
+    if limit is not None and limit > 0:
+        limit = max(1, min(int(limit), 500))
+        limit_clause = f"LIMIT {limit}"
 
     if count:
         query = f"""
@@ -151,8 +236,13 @@ def distinct_key(conn, key: str, count: bool, where: str | None):
             {where_clause}
             GROUP BY mm.value
             ORDER BY total DESC
+            {limit_clause}
         """
-        cursor = conn.execute(query, (key,))
+        try:
+            cursor = conn.execute(query, (key,))
+        except sqlite3.OperationalError as e:
+            print(f"Error SQL: {e}")
+            return
         rows = cursor.fetchall()
         total = sum(r["total"] for r in rows)
         sep = "-" * 50
@@ -166,6 +256,8 @@ def distinct_key(conn, key: str, count: bool, where: str | None):
             print(f"  {val_str:<50s} {r['total']:>8d}  {pct:5.1f}%")
         print(f"  {sep} {sep2}")
         print(f"  {'TOTAL':<50s} {total:>8d}")
+        if limit and len(rows) == limit:
+            print(f"  (mostrando top {limit}, puede haber más)")
     else:
         query = f"""
             SELECT DISTINCT mm.value AS val
@@ -174,70 +266,123 @@ def distinct_key(conn, key: str, count: bool, where: str | None):
             WHERE mm.key = ?
             {where_clause}
             ORDER BY val
+            {limit_clause}
         """
-        cursor = conn.execute(query, (key,))
+        try:
+            cursor = conn.execute(query, (key,))
+        except sqlite3.OperationalError as e:
+            print(f"Error SQL: {e}")
+            return
         rows = cursor.fetchall()
         for r in rows:
             val = r["val"]
             if val is not None:
                 print(f"  {val[:100]}")
-        print(f"  ({len(rows)} valores únicos)")
+        print(f"  ({len(rows)} valores únicos" + (f", límite {limit}" if limit else "") + ")")
+
+
+def _escape_like(text: str) -> str:
+    """Escapa % y _ para LIKE, manteniendo búsqueda literal."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def search_text(conn, text: str, limit: int = 30):
-    """Busca texto en columnas de media y valores de media_metadata."""
-    pattern = f"%{text}%"
-    results = []
+    """Busca texto en columnas de media, media_metadata y media_keypoints (consolidado, con paginación global)."""
+    # Límite global clamp
+    limit = max(1, min(int(limit), 200))
+    esc = _escape_like(text)
+    pattern = f"%{esc}%"
 
-    # Buscar en columnas TEXT de media
+    results: list[sqlite3.Row] = []
+
+    # 1) Buscar en columnas TEXT de media con UNA query consolidada (OR)
     cursor = conn.execute("PRAGMA table_info(media)")
     text_cols = [c["name"] for c in cursor.fetchall()
                  if c["type"] in ("TEXT", "VARCHAR")]
-
-    for col in text_cols:
+    if text_cols:
+        # Construir WHERE col LIKE ? ESCAPE '\' OR col2 LIKE ? ...
+        ors = " OR ".join(f"{col} LIKE ? ESCAPE '\\'" for col in text_cols)
+        # Necesitamos también exponer qué columna hizo match; usamos CASE
+        case_parts = " || ' | '.join? -> simplificamos: buscar con OR y luego identificar columna via UNION con etiqueta"
+        # Mejor: UNION ALL por columna pero con LIMIT global: hacemos UNION ALL y luego LIMIT
+        union_parts = " UNION ALL ".join(
+            f"SELECT id, '{col}' AS columna, substr({col},1,120) AS valor FROM media WHERE {col} LIKE ? ESCAPE '\\'"
+            for col in text_cols
+        )
+        # Parámetros: un pattern por col
+        params = [pattern] * len(text_cols)
         try:
-            cursor = conn.execute(
-                f"SELECT id, '{col}' AS columna, {col} AS valor "
-                f"FROM media WHERE {col} LIKE ? LIMIT ?",
-                (pattern, limit)
-            )
-            for row in cursor.fetchall():
-                results.append(row)
+            # Usamos subquery para LIMIT global
+            q = f"SELECT * FROM ({union_parts}) LIMIT ?"
+            cur = conn.execute(q, (*params, limit))
+            results.extend(cur.fetchall())
+        except sqlite3.OperationalError:
+            # Fallback al método anterior por columna si UNION falla
+            for col in text_cols:
+                try:
+                    cur = conn.execute(
+                        f"SELECT id, '{col}' AS columna, substr({col},1,120) AS valor "
+                        f"FROM media WHERE {col} LIKE ? ESCAPE '\\' LIMIT ?",
+                        (pattern, limit)
+                    )
+                    results.extend(cur.fetchall())
+                    if len(results) >= limit:
+                        results = results[:limit]
+                        break
+                except sqlite3.OperationalError:
+                    pass
+
+    # 2) Buscar en media_metadata (si queda cupo)
+    remaining = limit - len(results)
+    if remaining > 0:
+        cursor = conn.execute("""
+            SELECT mm.media_id AS id, 'media_metadata:' || mm.key AS columna,
+                   substr(mm.value, 1, 120) AS valor
+            FROM media_metadata mm
+            WHERE mm.value LIKE ? ESCAPE '\\'
+            LIMIT ?
+        """, (pattern, remaining))
+        results.extend(cursor.fetchall())
+
+    # 3) Buscar en media_keypoints
+    remaining = limit - len(results)
+    if remaining > 0:
+        try:
+            cursor = conn.execute("""
+                SELECT kp.media_id AS id, 'keypoints:' || kp.key AS columna,
+                       substr(kp.value, 1, 120) AS valor
+                FROM media_keypoints kp
+                WHERE kp.value LIKE ? ESCAPE '\\'
+                LIMIT ?
+            """, (pattern, remaining))
+            results.extend(cursor.fetchall())
         except sqlite3.OperationalError:
             pass
-
-    # Buscar en media_metadata
-    cursor = conn.execute("""
-        SELECT mm.media_id AS id, 'media_metadata' AS columna,
-               mm.key || ' = ' || substr(mm.value, 1, 100) AS valor
-        FROM media_metadata mm
-        WHERE mm.value LIKE ?
-        LIMIT ?
-    """, (pattern, limit))
-    for row in cursor.fetchall():
-        results.append(row)
 
     if not results:
         print(f"  No se encontraron resultados para '{text}'")
         return
 
-    print(f"  {len(results)} resultados para '{text}':")
+    print(f"  {len(results)} resultados para '{text}' (límite global {limit}):")
     print()
-    seen_ids = set()
+    # Mostrar con filename, deduplicando ids si hay muchos resultados
+    shown = 0
     for r in results:
-        if r["id"] not in seen_ids or len(results) < 20:
-            seen_ids.add(r["id"])
-            # Obtener filename
-            cursor = conn.execute(
-                "SELECT filename_original, type FROM media WHERE id = ?",
-                (r["id"],)
-            )
-            m = cursor.fetchone()
-            fname = m["filename_original"] if m else "?"
-            ftype = m["type"] if m else "?"
-            print(f"  id={r['id']:6d} [{ftype:6s}] {fname}")
-            print(f"         {r['columna']}: {r['valor']}")
-            print()
+        if shown >= limit:
+            break
+        cursor = conn.execute(
+            "SELECT filename_original, type FROM media WHERE id = ?",
+            (r["id"],)
+        )
+        m = cursor.fetchone()
+        fname = m["filename_original"] if m else "?"
+        ftype = m["type"] if m else "?"
+        print(f"  id={r['id']:6d} [{ftype:6s}] {fname}")
+        print(f"         {r['columna']}: {r['valor']}")
+        print()
+        shown += 1
+    if len(results) == limit:
+        print(f"  (mostrando {limit}, puede haber más — usa --limit mayor)")
 
 
 def main(argv=None):
@@ -248,21 +393,22 @@ def main(argv=None):
 Ejemplos:
   python scripts\query.py --columns
   python scripts\query.py --distinct type
-  python scripts\query.py --distinct author --count
-  python scripts\query.py --distinct author --count --where "type='image'"
-  python scripts\query.py --key iptc_keywords --count
-  python scripts\query.py --search "tucuman"
+  python scripts\query.py --distinct author --count --where "type='image'" --limit 20
+  python scripts\query.py --distinct key --table media_keypoints --count
+  python scripts\query.py --key ia_keywords --count --limit 30
+  python scripts\query.py --search "tucuman" --limit 50
   python scripts\query.py --distinct color_1_name_basic --count
         """,
     )
     parser.add_argument("--db", default=None, help="Ruta a la base de datos")
-    parser.add_argument("--columns", action="store_true", help="Listar columnas disponibles")
-    parser.add_argument("--distinct", metavar="COLUMNA", help="Valores únicos de una columna de media")
+    parser.add_argument("--columns", action="store_true", help="Listar columnas y keys disponibles")
+    parser.add_argument("--distinct", metavar="COLUMNA", help="Valores únicos de una columna")
+    parser.add_argument("--table", default="media", help="Tabla para --distinct (default: media)")
     parser.add_argument("--key", metavar="KEY", help="Valores únicos de una key en media_metadata")
     parser.add_argument("--count", action="store_true", help="Incluir conteo de ocurrencias")
     parser.add_argument("--where", metavar="CONDICION", help="Filtro SQL (ej: \"type='image'\")")
-    parser.add_argument("--search", metavar="TEXTO", help="Buscar texto en toda la DB")
-    parser.add_argument("--limit", type=int, default=30, help="Límite de resultados (default: 30)")
+    parser.add_argument("--search", metavar="TEXTO", help="Buscar texto en toda la DB (media, metadata, keypoints)")
+    parser.add_argument("--limit", type=int, default=None, help="Límite de resultados (default: sin límite para distinct, 30 para search)")
 
     args = parser.parse_args(argv)
 
@@ -273,24 +419,22 @@ Ejemplos:
     if args.columns:
         list_columns(conn)
     elif args.distinct:
-        if not _es_columna_valida(conn, args.distinct):
-            print(f"Error: '{args.distinct}' no es una columna válida de la tabla media.")
-            print("Usá --columns para ver las columnas disponibles.")
-            conn.close()
-            return
+        lim = args.limit
         if args.where and not _where_seguro(args.where):
             print("Error: la condición --where contiene comandos SQL no permitidos.")
             conn.close()
             return
-        distinct_column(conn, args.distinct, args.count, args.where)
+        distinct_column(conn, args.distinct, args.count, args.where, tabla=args.table, limit=lim)
     elif args.key:
         if args.where and not _where_seguro(args.where):
             print("Error: la condición --where contiene comandos SQL no permitidos.")
             conn.close()
             return
-        distinct_key(conn, args.key, args.count, args.where)
+        lim = args.limit
+        distinct_key(conn, args.key, args.count, args.where, limit=lim)
     elif args.search:
-        search_text(conn, args.search, args.limit)
+        lim = args.limit if args.limit is not None else 30
+        search_text(conn, args.search, lim)
     else:
         parser.print_help()
 

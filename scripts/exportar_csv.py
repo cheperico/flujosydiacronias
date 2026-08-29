@@ -61,20 +61,41 @@ TABLAS_VISIBLES = [
 TABLAS_QUE_NO_EXPORTAN_EMBEDDINGS = ["media_embeddings"]
 """media_embeddings contiene BLOB binarios; exportamos metadatos sin la columna embedding."""
 
-# Claves de media_metadata cuyo valor es demasiado grande para CSV útil
-MEDIA_METADATA_EXCLUIR_VALORES_GRANDES = {"transcript", "transcript_segments"}
+# Claves de media_metadata cuyo valor es demasiado grande o ruidoso para CSV útil
+# (legacy "transcript" nunca ocurre; las reales grandes son whisper_segments/video_analysis)
+MEDIA_METADATA_EXCLUIR_VALORES_GRANDES = {
+    "whisper_segments", "whisper_info", "video_analysis",
+    "ia_sonido_raw", "contenedor_streams", "whisper_estado",
+    "transcript", "transcript_segments",  # legacy
+}
+# Umbral adicional por tamaño (chars) — aunque la key no esté listada, si supera 64k se filtra
+MEDIA_METADATA_MAX_CHARS = 64 * 1024
 
 
 def obtener_resumen(conn: sqlite3.Connection) -> dict[str, int]:
-    """Cuenta registros de cada tabla visible."""
-    resumen: dict[str, int] = {}
-    for tabla in TABLAS_VISIBLES:
-        try:
-            count = conn.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()[0]
-            resumen[tabla] = count
-        except sqlite3.OperationalError:
-            resumen[tabla] = -1  # tabla no existe
-    return resumen
+    """Cuenta registros de cada tabla visible (DRY: db.util.obtener_resumen con filtro)."""
+    try:
+        from db.util import obtener_resumen as _obtener
+        full = _obtener(conn)
+        # Filtrar solo visibles, mantener orden
+        return {t: full.get(t, -1) for t in TABLAS_VISIBLES}
+    except Exception:
+        resumen: dict[str, int] = {}
+        for tabla in TABLAS_VISIBLES:
+            try:
+                count = conn.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()[0]
+                resumen[tabla] = count
+            except sqlite3.OperationalError:
+                resumen[tabla] = -1
+        return resumen
+
+
+def _tiene_columna_id(conn: sqlite3.Connection, tabla: str) -> bool:
+    try:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tabla})")}
+        return "id" in cols
+    except Exception:
+        return False
 
 
 def exportar_tabla(
@@ -84,108 +105,153 @@ def exportar_tabla(
     incluir_encabezado: bool = True,
 ) -> str | None:
     """
-    Exporta una tabla completa a CSV.
-
-    Args:
-        conn: Conexión a la DB.
-        tabla: Nombre de la tabla.
-        directorio: Carpeta de salida.
-        incluir_encabezado: Si True, escribe la fila de columnas.
-
-    Returns:
-        Ruta al archivo CSV generado, o None si la tabla no existe.
+    Exporta una tabla completa a CSV (keyset pagination si hay id, sino OFFSET; quoting Excel-safe).
+    Para media_metadata filtra claves grandes y por tamaño LENGTH(value) > 64k.
     """
     try:
-        # Obtener columnas
         cursor = conn.execute(f"SELECT * FROM {tabla} LIMIT 0")
         columnas = [desc[0] for desc in cursor.description]
     except sqlite3.OperationalError:
         log.warning("  Tabla '%s' no existe. Se omite.", tabla)
         return None
 
+    has_id = _tiene_columna_id(conn, tabla) and tabla not in ("config",)
+
     if tabla in TABLAS_QUE_NO_EXPORTAN_EMBEDDINGS:
-        # Exportar metadatos (sin el blob de embedding) — todas las filas
         columnas_sin_blob = [c for c in columnas if c != "embedding"]
+        cols_sql = ", ".join(columnas_sin_blob)
         path = os.path.join(directorio, f"{tabla}.csv")
         total = 0
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.writer(f)
+            writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
             if incluir_encabezado:
                 writer.writerow(columnas_sin_blob)
-            # Streaming de a 500 filas
-            offset = 0
             batch_size = 500
-            while True:
-                filas = conn.execute(
-                    f"SELECT {', '.join(columnas_sin_blob)} FROM {tabla} LIMIT ? OFFSET ?",
-                    (batch_size, offset),
-                ).fetchall()
-                if not filas:
-                    break
-                for fila in filas:
-                    writer.writerow(fila)
-                total += len(filas)
-                offset += batch_size
+            if has_id:
+                last_id = 0
+                while True:
+                    filas = conn.execute(
+                        f"SELECT {cols_sql} FROM {tabla} WHERE id > ? ORDER BY id LIMIT ?",
+                        (last_id, batch_size),
+                    ).fetchall()
+                    if not filas:
+                        break
+                    for fila in filas:
+                        writer.writerow([str(v) if v is not None else "" for v in fila])
+                    total += len(filas)
+                    try:
+                        last_id = filas[-1][0]
+                    except Exception:
+                        break
+            else:
+                offset = 0
+                while True:
+                    filas = conn.execute(
+                        f"SELECT {cols_sql} FROM {tabla} LIMIT ? OFFSET ?",
+                        (batch_size, offset),
+                    ).fetchall()
+                    if not filas:
+                        break
+                    for fila in filas:
+                        writer.writerow([str(v) if v is not None else "" for v in fila])
+                    total += len(filas)
+                    offset += batch_size
         log.info("  %s.csv → %d columnas (sin embedding), %d filas", tabla, len(columnas_sin_blob), total)
         return path
 
-    # Exportar todas las filas
     path = os.path.join(directorio, f"{tabla}.csv")
+    filtrados = 0
 
-    # Para media_metadata: filtrar claves con valores demasiado grandes para CSV
     if tabla == "media_metadata":
         total = 0
+        idx_key = columnas.index("key") if "key" in columnas else 2
+        idx_val = columnas.index("value") if "value" in columnas else 3
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.writer(f)
+            writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
             if incluir_encabezado:
                 writer.writerow(columnas)
-            offset = 0
             batch_size = 500
+            if has_id:
+                last_id = 0
+                while True:
+                    filas = conn.execute(
+                        f"SELECT * FROM {tabla} WHERE id > ? ORDER BY id LIMIT ?",
+                        (last_id, batch_size),
+                    ).fetchall()
+                    if not filas:
+                        break
+                    for fila in filas:
+                        key = fila[idx_key]
+                        val = fila[idx_val]
+                        if key in MEDIA_METADATA_EXCLUIR_VALORES_GRANDES:
+                            filtrados += 1
+                            continue
+                        if val is not None and len(str(val)) > MEDIA_METADATA_MAX_CHARS:
+                            filtrados += 1
+                            continue
+                        writer.writerow([str(v) if v is not None else "" for v in fila])
+                        total += 1
+                    last_id = filas[-1][0]
+            else:
+                offset = 0
+                while True:
+                    filas = conn.execute(
+                        f"SELECT * FROM {tabla} LIMIT ? OFFSET ?", (batch_size, offset)
+                    ).fetchall()
+                    if not filas:
+                        break
+                    for fila in filas:
+                        key = fila[idx_key]
+                        val = fila[idx_val]
+                        if key in MEDIA_METADATA_EXCLUIR_VALORES_GRANDES:
+                            filtrados += 1
+                            continue
+                        if val is not None and len(str(val)) > MEDIA_METADATA_MAX_CHARS:
+                            filtrados += 1
+                            continue
+                        writer.writerow([str(v) if v is not None else "" for v in fila])
+                        total += 1
+                    offset += batch_size
+        log.info("  %s.csv → %d registros (filtrados %d: claves grandes / >64k)", tabla, total, filtrados)
+        return path
+
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
+        if incluir_encabezado:
+            writer.writerow(columnas)
+        batch_size = 500
+        total = 0
+        if has_id:
+            cols_sql = ", ".join(columnas)
+            last_id = 0
             while True:
                 filas = conn.execute(
-                    f"SELECT * FROM {tabla} LIMIT ? OFFSET ?",
-                    (batch_size, offset),
+                    f"SELECT {cols_sql} FROM {tabla} WHERE id > ? ORDER BY id LIMIT ?",
+                    (last_id, batch_size),
                 ).fetchall()
                 if not filas:
                     break
                 for fila in filas:
-                    # Saltar filas con valores demasiado grandes
-                    key = fila[2]  # columna 'key' (índice 2: id, media_id, key, value)
-                    if key in MEDIA_METADATA_EXCLUIR_VALORES_GRANDES:
-                        continue
-                    fila_plana = [
-                        str(v) if v is not None else None for v in fila
-                    ]
-                    writer.writerow(fila_plana)
-                    total += 1
+                    writer.writerow([str(v) if v is not None else "" for v in fila])
+                total += len(filas)
+                last_id = filas[-1][0]
+        else:
+            offset = 0
+            while True:
+                filas = conn.execute(f"SELECT * FROM {tabla} LIMIT ? OFFSET ?", (batch_size, offset)).fetchall()
+                if not filas:
+                    break
+                for fila in filas:
+                    writer.writerow([str(v) if v is not None else "" for v in fila])
+                total += len(filas)
                 offset += batch_size
-        log.info("  %s.csv → %s registros (filtrados: sin transcript/segments)", tabla, total)
-        return path
 
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        if incluir_encabezado:
-            writer.writerow(columnas)
-
-        # Streaming: fetch de a 500 para no saturar memoria
-        offset = 0
-        batch_size = 500
-        while True:
-            filas = conn.execute(
-                f"SELECT * FROM {tabla} LIMIT ? OFFSET ?",
-                (batch_size, offset),
-            ).fetchall()
-            if not filas:
-                break
-            for fila in filas:
-                # Convertir tipos no serializables a string
-                fila_plana = [
-                    str(v) if v is not None else None for v in fila
-                ]
-                writer.writerow(fila_plana)
-            offset += batch_size
-
-    log.info("  %s.csv → %s registros, %d columnas", tabla, obtener_resumen(conn).get(tabla, "?"), len(columnas))
+    # Alinear _resumen.txt con filas realmente escritas (no con total DB si hubo filtro)
+    resumen = obtener_resumen(conn).get(tabla, "?")
+    if filtrados:
+        log.info("  %s.csv → %d registros (DB %s, filtrados %d), %d columnas", tabla, total, resumen, filtrados, len(columnas))
+    else:
+        log.info("  %s.csv → %d registros, %d columnas", tabla, total, len(columnas))
     return path
 
 

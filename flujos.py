@@ -216,21 +216,26 @@ def leer_db(db_path: str | None = None) -> str:
 
 
 def resumen_db(conn) -> str:
-    """Devuelve un resumen con los totales de la DB."""
-    total = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
-    imagenes = conn.execute("SELECT COUNT(*) FROM media WHERE type='image'").fetchone()[0]
-    videos = conn.execute("SELECT COUNT(*) FROM media WHERE type='video'").fetchone()[0]
-    audios = conn.execute("SELECT COUNT(*) FROM media WHERE type='audio'").fetchone()[0]
-    textos = conn.execute("SELECT COUNT(*) FROM media WHERE type='text'").fetchone()[0]
-    otros = total - imagenes - videos - audios - textos
-    return (
-        f"  Total:      {total:>6d}\n"
-        f"  Imagenes:   {imagenes:>6d}\n"
-        f"  Videos:     {videos:>6d}\n"
-        f"  Audios:     {audios:>6d}\n"
-        f"  Textos:     {textos:>6d}\n"
-        f"  Otros:      {otros:>6d}"
-    )
+    """Devuelve un resumen con los totales de la DB (DRY: delega en db.util)."""
+    try:
+        from db.util import resumen_texto
+        return resumen_texto(conn)
+    except Exception:
+        # Fallback si util no está disponible
+        total = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+        imagenes = conn.execute("SELECT COUNT(*) FROM media WHERE type='image'").fetchone()[0]
+        videos = conn.execute("SELECT COUNT(*) FROM media WHERE type='video'").fetchone()[0]
+        audios = conn.execute("SELECT COUNT(*) FROM media WHERE type='audio'").fetchone()[0]
+        textos = conn.execute("SELECT COUNT(*) FROM media WHERE type='text'").fetchone()[0]
+        otros = total - imagenes - videos - audios - textos
+        return (
+            f"  Total:      {total:>6d}\n"
+            f"  Imagenes:   {imagenes:>6d}\n"
+            f"  Videos:     {videos:>6d}\n"
+            f"  Audios:     {audios:>6d}\n"
+            f"  Textos:     {textos:>6d}\n"
+            f"  Otros:      {otros:>6d}"
+        )
 
 
 def _preguntar_sn(pregunta: str, default: bool = False) -> bool:
@@ -503,13 +508,12 @@ def opcion_importar_telegram(db_path: str | None = None):
     include_system = _preguntar_sn("Incluir mensajes de sistema", default=True)
     ingest_media = _preguntar_sn("Ingerir multimedia en tabla media", default=True)
     dry_run = _preguntar_sn("Solo previsualizar (dry-run)")
-    destino = input("  ?Copiar media a carpeta canónica? (ej: D:/Medios) [Enter = no]: ").strip()
 
     print(f"\n  Resumen: export={export_path}  modo={modo_str}"
           f"  sistema={'SI' if include_system else 'NO'}"
           f"  ingest_media={'SI' if ingest_media else 'NO'}"
-          f"  dry_run={'SI' if dry_run else 'NO'}"
-          f"  destino={destino or '(no copiar)'}")
+          f"  dry_run={'SI' if dry_run else 'NO'}")
+    print("  (Los archivos quedan en la carpeta del export; para consolidar usá Mantenimiento → Mover/Copiar o consolidar_medios.py)")
     if not _preguntar_sn("Ejecutar importación"):
         print("  Cancelado.")
         pausa()
@@ -522,8 +526,6 @@ def opcion_importar_telegram(db_path: str | None = None):
         (not ingest_media, "--no-ingest"),
         (dry_run, "--dry-run"),
     ])
-    if destino:
-        args.extend(["--destino", destino])
     if db_path:
         args.extend(["--db", db_path])
     import_telegram.main(args)
@@ -572,56 +574,87 @@ def opcion_ingestar_textos(db_path: str | None = None):
 
 
 def opcion_listar(db_path: str | None = None):
-    """Submenu: listar distintos aspectos de la DB."""
+    """Submenu: listar distintos aspectos de la DB (paginado: 9 por hoja)."""
     from scripts import query
     db_flag = ["--db", db_path] if db_path else []
 
-    while True:
-        limpiar_pantalla()
-        print("=== LISTAR ===\n")
-        print("  1) Tipos de medio")
-        print("  2) Autores")
-        print("  3) Carpetas")
-        print("  4) Colores basicos")
-        print("  5) Provincias (geocode)")
-        print("  6) Buscar texto")
-        print("  7) Consulta libre (flags directos a query.py)")
-        print("  8) Revisar GPS en archivos")
-        print("  9) Detalle completo de registros (todas las columnas)")
-        print("  0) Volver\n")
+    def _preguntar_limit() -> list[str]:
+        lim = input("  Límite (Enter = sin límite, ej 30): ").strip()
+        if lim.isdigit() and int(lim) > 0:
+            n = max(1, min(int(lim), 500))
+            return ["--limit", str(n)]
+        return []
 
-        opc = input("  Opcion: ").strip()
-        if opc == "1":
-            query.main(["--distinct", "type", "--count"] + db_flag)
-        elif opc == "2":
-            query.main(["--distinct", "author", "--count"] + db_flag)
-        elif opc == "3":
-            query.main(["--distinct", "carpeta", "--count"] + db_flag)
-        elif opc == "4":
-            query.main(["--distinct", "color_1_name_basic", "--count", "--where",
-                        "color_1_name_basic IS NOT NULL"] + db_flag)
-        elif opc == "5":
-            query.main(["--distinct", "provincia", "--count", "--where",
-                        "provincia IS NOT NULL"] + db_flag)
-        elif opc == "6":
-            texto = input("  Texto a buscar: ").strip()
-            if texto:
-                query.main(["--search", texto] + db_flag)
-        elif opc == "7":
-            flags = input("  Flags (ej: --distinct type --count): ").strip()
-            if flags:
-                import shlex
-                query.main(shlex.split(flags))
-        elif opc == "8":
-            opcion_check_gps(db_path)
-        elif opc == "9":
-            opcion_detalle_db(db_path)
-        elif opc == "0":
-            break
+    def _buscar_texto(db):
+        t = input("  Texto a buscar: ").strip()
+        if t:
+            query.main(["--search", t] + db_flag + _preguntar_limit())
         else:
-            print("  Opcion invalida.")
-        if opc not in ("9", "8", "0"):
-            pausa()
+            print("  Cancelado.")
+
+    def _listar_key(db):
+        k = input("  Key (ej: ia_keywords, whisper_estado, weather_label, dia_semana): ").strip()
+        if k:
+            query.main(["--key", k, "--count"] + db_flag + _preguntar_limit())
+        else:
+            print("  Cancelado.")
+
+    def _distinct_custom(db):
+        col = input("  Columna: ").strip()
+        w = input("  WHERE (ej: type='image'): ").strip()
+        if col and w:
+            query.main(["--distinct", col, "--count", "--where", w] + db_flag + _preguntar_limit())
+        elif col:
+            query.main(["--distinct", col, "--count"] + db_flag + _preguntar_limit())
+        else:
+            print("  Cancelado.")
+
+    def _consulta_libre(db):
+        import shlex
+        flags = input("  Flags (ej: --distinct type --count): ").strip()
+        if not flags:
+            return
+        toks = shlex.split(flags)
+        if "--db" not in toks and db_flag:
+            toks += db_flag
+        query.main(toks)
+
+    hojas = [
+        ("  -- Básico --\n", {
+            "1": ("Tipos de medio", lambda db: query.main(["--distinct", "type", "--count"] + db_flag)),
+            "2": ("Autores", lambda db: query.main(["--distinct", "author", "--count"] + db_flag + _preguntar_limit())),
+            "3": ("Carpetas", lambda db: query.main(["--distinct", "carpeta", "--count"] + db_flag + _preguntar_limit())),
+            "4": ("Colores básicos", lambda db: query.main(["--distinct", "color_1_name_basic", "--count", "--where", "color_1_name_basic IS NOT NULL"] + db_flag)),
+            "5": ("Provincias (geocode)", lambda db: query.main(["--distinct", "provincia", "--count", "--where", "provincia IS NOT NULL"] + db_flag + _preguntar_limit())),
+            "6": ("Municipios", lambda db: query.main(["--distinct", "municipio", "--count", "--where", "municipio IS NOT NULL"] + db_flag + _preguntar_limit())),
+            "7": ("Buscar texto (media + metadata)", _buscar_texto),
+            "8": ("Columnas y keys disponibles (--columns)", lambda db: query.main(["--columns"] + db_flag)),
+            "9": ("Listar valores de una key de metadata", _listar_key),
+        }),
+        ("  -- Avanzado --\n", {
+            "1": ("Keypoints: listar keys distintas", lambda db: query.main(["--distinct", "key", "--count", "--table", "media_keypoints"] + db_flag)),
+            "2": ("Telegram chats (si hay)", lambda db: query.main(["--distinct", "name", "--table", "telegram_chats"] + db_flag)),
+            "3": ("Distinct con filtro WHERE custom", _distinct_custom),
+            "4": ("Consulta libre (flags directos a query.py)", _consulta_libre),
+            "5": ("Revisar GPS en archivos", lambda db: opcion_check_gps(db)),
+            "6": ("Detalle completo de registros (todas las columnas)", lambda db: opcion_detalle_db(db)),
+        }),
+    ]
+    _menu_paginado("LISTAR", hojas, db_path)
+
+
+def opcion_check_db_data(db_path: str | None = None):
+    """Wrapper TUI para stats de clima/día/geocode (check_db_data.py)."""
+    from scripts import check_db_data
+    # Preguntar límite
+    try:
+        lim_str = input("  Muestras a mostrar [10]: ").strip() or "10"
+        lim = max(1, min(int(lim_str), 50))
+    except ValueError:
+        lim = 10
+    db_arg = ["--db", db_path] if db_path else []
+    check_db_data.main(db_arg + ["--limit", str(lim)])
+    pausa()
 
 
 def opcion_consultar(db_path: str | None = None):
@@ -629,6 +662,8 @@ def opcion_consultar(db_path: str | None = None):
     _menu("CONSULTAR BASE DE DATOS", {
         "1": ("Ver resumen de la DB", opcion_check_db),
         "2": ("Listar...", opcion_listar),
+        "3": ("Stats clima / día / geocode", opcion_check_db_data),
+        "4": ("Detalle de un medio por ID", opcion_detalle_por_id),
     }, db_path)
 
 
@@ -779,38 +814,95 @@ def opcion_astronomia(db_path: str | None = None):
 
 
 def opcion_check_gps(db_path: str | None = None):
-    limpiar_pantalla()
-    print("=== REVISAR GPS EN ARCHIVOS ===\n")
+    """Submenú GPS: muestras DB, verificación con ExifTool, carpeta directa y conteo total."""
+    from scripts import check_gps
     db_path = leer_db(db_path)
-    if not os.path.isfile(db_path):
-        print("  No se encuentra la base de datos.")
-        pausa()
-        return
 
-    conn = sqlite3.connect(db_path)
-    try:
-        cursor = conn.execute(
-            "SELECT filepath_absoluto FROM media WHERE type='image' AND latitude IS NULL ORDER BY RANDOM() LIMIT 5"
-        )
-        sin_gps = cursor.fetchall()
-        if sin_gps:
-            print("  Muestras de imagenes sin GPS en DB (5 al azar):")
+    def _muestras_db(db):
+        if not os.path.isfile(db):
+            print("  No se encuentra la base de datos.")
+            pausa()
+            return
+        conn = sqlite3.connect(db)
+        try:
+            # Totales
+            tot_img = conn.execute("SELECT COUNT(*) FROM media WHERE type='image'").fetchone()[0]
+            sin = conn.execute("SELECT COUNT(*) FROM media WHERE type='image' AND latitude IS NULL").fetchone()[0]
+            con = tot_img - sin
+            print(f"  Imagenes: {tot_img} (con GPS: {con}, sin GPS: {sin})")
+            tot_vid = conn.execute("SELECT COUNT(*) FROM media WHERE type='video'").fetchone()[0]
+            vid_sin = conn.execute("SELECT COUNT(*) FROM media WHERE type='video' AND latitude IS NULL").fetchone()[0]
+            print(f"  Videos: {tot_vid} (con GPS: {tot_vid-vid_sin}, sin GPS: {vid_sin})")
             print()
-            for (fp,) in sin_gps:
-                print(f"    {fp}")
-        else:
-            print("  No hay imagenes sin GPS en la DB.")
-    except sqlite3.OperationalError as e:
-        print(f"  Error: {e}")
-    conn.close()
+            cur = conn.execute(
+                "SELECT filepath_absoluto FROM media WHERE type='image' AND latitude IS NULL ORDER BY RANDOM() LIMIT 5"
+            )
+            sin_gps = cur.fetchall()
+            if sin_gps:
+                print("  Muestras de imágenes sin GPS en DB (5 al azar):")
+                for (fp,) in sin_gps:
+                    print(f"    {fp}")
+            else:
+                print("  No hay imágenes sin GPS en la DB.")
+        except sqlite3.OperationalError as e:
+            print(f"  Error: {e}")
+        conn.close()
+        pausa()
 
-    print()
-    print("  Para un analisis completo, usa: python flujos.py check-gps --db ruta")
-    pausa()
+    def _verificar_exiftool(db):
+        # Delega en check_gps.py que sí usa ExifTool y distingue archivo no existe / GPS real
+        try:
+            n = input("  Cantidad de muestras [5]: ").strip() or "5"
+            check_gps.main(["--db", db, "--samples", n])
+        except Exception as e:
+            print(f"  Error: {e}")
+        pausa()
+
+    def _carpeta(db):
+        carpeta = input("  Carpeta a inspeccionar (ruta): ").strip()
+        if not carpeta:
+            print("  Cancelado.")
+            pausa()
+            return
+        try:
+            n = input("  Muestras [5]: ").strip() or "5"
+            check_gps.main(["--folder", carpeta, "--samples", n])
+        except Exception as e:
+            print(f"  Error: {e}")
+        pausa()
+
+    def _conteo_total(db):
+        if not os.path.isfile(db):
+            print("  No se encuentra la base de datos.")
+            pausa()
+            return
+        conn = sqlite3.connect(db)
+        try:
+            for typ in ("image", "video", "audio", "text", "other"):
+                tot = conn.execute("SELECT COUNT(*) FROM media WHERE type=?", (typ,)).fetchone()[0]
+                if tot:
+                    con = conn.execute("SELECT COUNT(*) FROM media WHERE type=? AND latitude IS NOT NULL", (typ,)).fetchone()[0]
+                    print(f"  {typ:<8s} {tot:>5d} total — con GPS: {con:>5d} — sin GPS: {tot-con:>5d}")
+            # GPS por fuente
+            print()
+            cur = conn.execute("SELECT geolocation_source, COUNT(*) FROM media WHERE latitude IS NOT NULL GROUP BY geolocation_source")
+            for src, cnt in cur.fetchall():
+                print(f"    fuente={src or '(NULL)':<20s} {cnt:>5d}")
+        except Exception as e:
+            print(f"  Error: {e}")
+        conn.close()
+        pausa()
+
+    _menu("REVISAR GPS", {
+        "1": ("Muestras DB (rápido, solo DB)", _muestras_db),
+        "2": ("Verificar con ExifTool (archivo real)", _verificar_exiftool),
+        "3": ("Inspeccionar carpeta (--folder)", _carpeta),
+        "4": ("Conteo total por tipo y fuente", _conteo_total),
+    }, db_path, intro="  Revisa GPS en DB y en archivos (ExifTool).")
 
 
 def opcion_detalle_db(db_path: str | None = None):
-    """Muestra todas las columnas de los ultimos registros."""
+    """Muestra todas las columnas de los ultimos registros (con clamp y metadata opcional)."""
     limpiar_pantalla()
     print("=== DETALLE COMPLETO DE REGISTROS ===\n")
 
@@ -828,14 +920,21 @@ def opcion_detalle_db(db_path: str | None = None):
         cols = [row[1] for row in conn.execute("PRAGMA table_info(media)")]
         print(f"  {len(cols)} columnas en media\n")
 
-        # Pedir cantidad
+        # Pedir cantidad con clamp 1..200
         try:
-            n = int(input("  Cantidad de registros a mostrar (default 10): ").strip() or "10")
+            n_raw = input("  Cantidad de registros a mostrar (default 10, máx 200): ").strip() or "10"
+            n = int(n_raw)
         except ValueError:
             n = 10
+        n = max(1, min(n, 200))
+        if n != int(n_raw) if n_raw.isdigit() else False:
+            pass
+        if n == 200:
+            print("  (limitado a 200)")
 
         cursor = conn.execute(
-            f"SELECT * FROM media ORDER BY id DESC LIMIT {n}"
+            "SELECT * FROM media ORDER BY id DESC LIMIT ?",
+            (n,),
         )
         rows = cursor.fetchall()
 
@@ -844,6 +943,8 @@ def opcion_detalle_db(db_path: str | None = None):
             conn.close()
             pausa()
             return
+
+        ver_meta = _preguntar_sn("Mostrar también media_metadata y keypoints por cada medio", default=False)
 
         for row in rows:
             print(f"  ── #{row['id']} ──")
@@ -854,6 +955,24 @@ def opcion_detalle_db(db_path: str | None = None):
                     if len(val_str) > 60:
                         val_str = val_str[:57] + "..."
                     print(f"    {col:<25s} {val_str}")
+            if ver_meta:
+                # metadata
+                metas = conn.execute(
+                    "SELECT key, substr(value,1,80) FROM media_metadata WHERE media_id=? ORDER BY key",
+                    (row["id"],),
+                ).fetchall()
+                if metas:
+                    print(f"    -- metadata ({len(metas)} claves) --")
+                    for k, v in metas:
+                        print(f"      {k:<25s} {v}")
+                kps = conn.execute(
+                    "SELECT key, timestamp_offset_secs, substr(value,1,60) FROM media_keypoints WHERE media_id=? ORDER BY timestamp_offset_secs LIMIT 5",
+                    (row["id"],),
+                ).fetchall()
+                if kps:
+                    print(f"    -- keypoints ({len(kps)} primeros) --")
+                    for k, off, v in kps:
+                        print(f"      [{k}] +{off:.1f}s: {v}")
             print()
 
         print(f"  {len(rows)} registros mostrados.")
@@ -863,6 +982,80 @@ def opcion_detalle_db(db_path: str | None = None):
     finally:
         conn.close()
 
+    pausa()
+
+
+def opcion_detalle_por_id(db_path: str | None = None):
+    """Detalle de un medio por ID: media + metadata + keypoints + embeddings info."""
+    limpiar_pantalla()
+    print("=== DETALLE POR ID ===\n")
+    db_path = leer_db(db_path)
+    if not os.path.isfile(db_path):
+        print("  No se encuentra la base de datos.")
+        pausa()
+        return
+    try:
+        mid_str = input("  ID del medio: ").strip()
+        mid = int(mid_str)
+    except ValueError:
+        print("  ID inválido.")
+        pausa()
+        return
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM media WHERE id=?", (mid,)).fetchone()
+        if not row:
+            print(f"  No existe medio #{mid}")
+            conn.close()
+            pausa()
+            return
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(media)")]
+        print(f"\n  ── #{row['id']} {row['filename_original']} [{row['type']}] ──")
+        for col in cols:
+            val = row[col]
+            if val is not None:
+                sval = str(val)
+                # Mostrar completo para campos clave, truncar resto
+                if col in ("filepath_absoluto", "sidecar_xml") and len(sval) > 80:
+                    print(f"    {col:<25s} {sval}")
+                else:
+                    if len(sval) > 80:
+                        sval = sval[:77] + "..."
+                    print(f"    {col:<25s} {sval}")
+        # metadata completa
+        metas = conn.execute("SELECT key, value FROM media_metadata WHERE media_id=? ORDER BY key", (mid,)).fetchall()
+        print(f"\n  metadata: {len(metas)} claves")
+        for r in metas:
+            v = r["value"] or ""
+            if len(v) > 120:
+                v = v[:117] + "..."
+            print(f"    {r['key']:<30s} = {v}")
+        # keypoints
+        kps = conn.execute(
+            "SELECT id, timestamp_offset_secs, timestamp_absolute, key, substr(value,1,100) FROM media_keypoints WHERE media_id=? ORDER BY timestamp_offset_secs",
+            (mid,),
+        ).fetchall()
+        print(f"\n  keypoints: {len(kps)}")
+        for r in kps[:20]:
+            print(f"    #{r[0]} [{r[3]}] +{r[1]:.1f}s {r[2]}: {r[4]}")
+        if len(kps) > 20:
+            print(f"    ... ({len(kps)-20} más)")
+        # embeddings
+        embs = conn.execute("SELECT modelo, fecha FROM media_embeddings WHERE media_id=?", (mid,)).fetchall()
+        if embs:
+            print(f"\n  embeddings: {len(embs)}")
+            for e in embs:
+                print(f"    {e[0]} @ {e[1]}")
+        # telegram link
+        if row["telegram_message_id"]:
+            tg = conn.execute("SELECT chat_id, message_id, text FROM telegram_messages WHERE id=?", (row["telegram_message_id"],)).fetchone()
+            if tg:
+                print(f"\n  telegram: chat={tg[0]} msg={tg[1]} text={str(tg[2])[:80] if tg[2] else ''}")
+    except Exception as e:
+        print(f"  Error: {e}")
+    finally:
+        conn.close()
     pausa()
 
 
@@ -946,6 +1139,13 @@ def opcion_undo_ingest(db_path: str | None = None):
                 pausa()
                 return
 
+            # Backup automático antes de operación destructiva
+            conn.commit()
+            conn.close()
+            bak = _auto_backup(db_path)
+            if bak:
+                print(f"  ✓ Backup automático: {os.path.basename(bak)}")
+            conn = sqlite3.connect(db_path)
             deleted = conn.execute("DELETE FROM media WHERE ingest_batch_id = ?", (bid,)).rowcount
             conn.commit()
             print(f"  Eliminados {deleted} medios del batch #{bid}.")
@@ -978,6 +1178,13 @@ def opcion_undo_ingest(db_path: str | None = None):
                 pausa()
                 return
 
+            # Backup automático antes de borrar track
+            conn.commit()
+            conn.close()
+            bak = _auto_backup(db_path)
+            if bak:
+                print(f"  ✓ Backup automático: {os.path.basename(bak)}")
+            conn = sqlite3.connect(db_path)
             # Revertir altitud de medios que obtuvieron altitud de este track
             # (marcamos como NULL los que tengan geolocation_source='track_gps')
             revertidos = conn.execute(
@@ -1094,36 +1301,129 @@ def _ejecutar_paso_mejora(pasos: str | None, db_path: str | None = None):
     pausa()
 
 
-def _auto_backup(db_path: str) -> str | None:
-    """Crea un backup automático con timestamp. Retorna la ruta del backup o None."""
+def _directorio_backups(db_path: str) -> str:
+    """Directorio unificado de backups: siempre db/backups/ junto a la DB."""
+    return os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
+
+
+def _backup_wal_safe(origen: str, destino: str) -> bool:
+    """Copia DB de forma segura con WAL: intenta sqlite backup API, fallback a copy2.
+    Hace wal_checkpoint antes de copiar para consistencia."""
     import shutil
+    # Intentar backup API (WAL-safe)
+    try:
+        src = sqlite3.connect(origen)
+        try:
+            src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+        dst = sqlite3.connect(destino)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+        src.close()
+        # Verificar tamaño
+        if os.path.isfile(destino) and os.path.getsize(destino) > 0:
+            return True
+    except Exception:
+        pass
+    # Fallback copy2
+    try:
+        shutil.copy2(origen, destino)
+        # Copiar también -wal/-shm si existen (evita inconsistencia si fallback)
+        for suf in ("-wal", "-shm"):
+            extra = origen + suf
+            if os.path.isfile(extra):
+                try:
+                    shutil.copy2(extra, destino + suf)
+                except Exception:
+                    pass
+        return os.path.isfile(destino)
+    except Exception:
+        return False
+
+
+def _auto_backup(db_path: str) -> str | None:
+    """Crea un backup automático con timestamp en db/backups/. Retorna la ruta o None."""
     from datetime import datetime
-    backup_dir = os.path.join(os.path.dirname(__file__), "db", "backups")
+    backup_dir = _directorio_backups(db_path)
     os.makedirs(backup_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(backup_dir, f"flujos_autobackup_{ts}.db")
+    backup_path = os.path.join(backup_dir, f"flujos_{ts}__autobackup.db")
     try:
-        shutil.copy2(db_path, backup_path)
-        return backup_path
+        ok = _backup_wal_safe(db_path, backup_path)
+        if ok:
+            _podar_backups(backup_dir)
+            return backup_path
+        print(f"  ⚠ Error al crear backup automático: fallo copia")
+        return None
     except Exception as e:
         print(f"  ⚠ Error al crear backup automático: {e}")
         return None
 
 
 def _crear_backup_manual(db_path: str) -> str | None:
-    """Crea backup con timestamp junto a la DB. Retorna la ruta o None."""
-    import shutil
+    """Crea backup con timestamp en db/backups/. Retorna la ruta o None."""
     from datetime import datetime
-    db_dir = os.path.dirname(db_path)
+    backup_dir = _directorio_backups(db_path)
+    os.makedirs(backup_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_name = f"flujos_backup_{ts}.db"
-    backup_path = os.path.join(db_dir, backup_name)
+    backup_path = os.path.join(backup_dir, f"flujos_{ts}__manual.db")
     try:
-        shutil.copy2(db_path, backup_path)
-        return backup_path
+        ok = _backup_wal_safe(db_path, backup_path)
+        if ok:
+            size_mb = os.path.getsize(backup_path) / (1024 * 1024)
+            print(f"  ✓ Backup: {os.path.basename(backup_path)} ({size_mb:.1f} MB) → {backup_dir}")
+            _podar_backups(backup_dir)
+            return backup_path
+        print(f"  Error creando backup: fallo copia")
+        return None
     except Exception as e:
         print(f"  Error creando backup: {e}")
         return None
+
+
+def _podar_backups(backup_dir: str, max_backups: int = 25, max_total_mb: int = 800) -> None:
+    """Retención simple: mantiene como máximo max_backups archivos .db más recientes
+    y poda si el total supera max_total_mb. No borra backups con nombres legacy fuera de patron."""
+    import re
+    try:
+        patron = re.compile(r"^flujos_.*\.db$")
+        archivos = []
+        for f in os.listdir(backup_dir):
+            if patron.match(f):
+                ruta = os.path.join(backup_dir, f)
+                if os.path.isfile(ruta):
+                    archivos.append((ruta, os.path.getmtime(ruta), os.path.getsize(ruta)))
+        if not archivos:
+            return
+        archivos.sort(key=lambda x: x[1], reverse=True)  # más reciente primero
+        # Podar por cantidad
+        if len(archivos) > max_backups:
+            for ruta, _, _ in archivos[max_backups:]:
+                try:
+                    os.remove(ruta)
+                    print(f"  (retención: eliminado backup antiguo {os.path.basename(ruta)})")
+                except Exception:
+                    pass
+            archivos = archivos[:max_backups]
+        # Podar por tamaño total
+        total = sum(s for _, _, s in archivos)
+        if total > max_total_mb * 1024 * 1024:
+            # Eliminar los más viejos hasta bajar del límite
+            archivos_asc = sorted(archivos, key=lambda x: x[1])
+            for ruta, _, sz in archivos_asc:
+                if total <= max_total_mb * 1024 * 1024:
+                    break
+                try:
+                    os.remove(ruta)
+                    total -= sz
+                    print(f"  (retención tamaño: eliminado {os.path.basename(ruta)})")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def _preguntar_modo(db_path: str | None = None):
@@ -1498,19 +1798,110 @@ def opcion_geocode(db_path: str | None = None):
     pausa()
 
 
+def opcion_consolidar_medios(db_path: str | None = None):
+    """Menu: consolidar medios de múltiples raíces en estructura unificada."""
+    limpiar_pantalla()
+    print("=== CONSOLIDAR MEDIOS (múltiples raíces → unificada) ===\n")
+    print("  Detecta TODAS las raíces absolutas de la DB y las reubica en una")
+    print("  estructura unificada (telegram/, testeos/, etc.) preservando subcarpetas.")
+    print("  Usa mover_media por raíz; actualiza ingest_root al final.\n")
+    print("  1) Previsualizar plan (dry-run)")
+    print("  2) Consolidar (mover — borra originales)")
+    print("  3) Consolidar (copiar — conserva originales, pregunta si actualiza DB)")
+    print("  0) Volver\n")
+    opc = input("  Opcion: ").strip()
+    db_path = leer_db(db_path)
+    from scripts import consolidar_medios
+    if opc == "1":
+        consolidar_medios.main(["--db", db_path, "--dry-run"])
+    elif opc == "2":
+        new_root = input("  Nueva raíz unificada (ej: G:/Flujos/Medios): ").strip()
+        if not new_root:
+            print("  Cancelado.")
+            pausa()
+            return
+        consolidar_medios.main(["--db", db_path, "--new-root", new_root, "--mode", "mover"])
+    elif opc == "3":
+        new_root = input("  Nueva raíz unificada (ej: G:/Flujos/Medios): ").strip()
+        if not new_root:
+            print("  Cancelado.")
+            pausa()
+            return
+        upd = _preguntar_sn("Actualizar DB para apuntar a los nuevos archivos")
+        args = ["--db", db_path, "--new-root", new_root, "--mode", "copiar"]
+        if upd:
+            args.append("--update-db")
+        consolidar_medios.main(args)
+    elif opc == "0":
+        return
+    pausa()
+
+
+def opcion_gestion_rutas(db_path: str | None = None):
+    """Submenú: gestión de rutas (relocate / mover / consolidar) con explicación de matriz de decisión."""
+    def _relocalizar_explicado(db):
+        print("\n  → Usá Relocalizar cuando los archivos YA fueron movidos con el")
+        print("    explorador y solo hay que actualizar filepath_absoluto en la DB.")
+        print("    No toca disco, solo DB (SQL substr prefijo).\n")
+        opcion_relocalizar(db)
+
+    def _ayuda_cual(db):
+        limpiar_pantalla()
+        print("=== ¿CUÁL USAR? ===\n")
+        print("  Archivos YA movidos manualmente → Relocalizar (1)")
+        print("  Archivos AÚN no movidos → Mover/Copiar (2)")
+        print("  Medios dispersos en varias raíces (Telegram, Testeos, etc.) → Consolidar (3)")
+        print("  Duda: ver docs/flujo_de_medios.md y README.md\n")
+        pausa()
+
+    _menu("GESTIÓN DE RUTAS", {
+        "1": ("Relocalizar (solo DB) — ya moviste con Explorer", _relocalizar_explicado),
+        "2": ("Mover/Copiar (FS+DB) — que el script mueva", opcion_mover_media),
+        "3": ("Consolidar (múltiples raíces → unificada)", opcion_consolidar_medios),
+        "4": ("Ayuda: ¿cuál usar?", _ayuda_cual),
+    }, db_path, intro=(
+        "  Matriz de decisión para actualizar rutas:\n"
+        "  • Relocalizar = solo DB (rápido, sin FS).\n"
+        "  • Mover/Copiar = FS + DB (mueve/copia archivos reales).\n"
+        "  • Consolidar = multi-raíz → una raíz unificada (usa Mover por raíz)."
+    ))
+
+
+def _ver_backups(db_path: str | None = None):
+    """Muestra lista de backups con tamaño/fecha y opción de podar."""
+    db_path = leer_db(db_path)
+    backups = listar_backups(db_path)
+    print(f"\n  Backups en {_directorio_backups(db_path)}: {len(backups)} (máx 25 / 800 MB)\n")
+    if not backups:
+        print("  (no hay backups)")
+    else:
+        for i, (ruta, name, size) in enumerate(backups, 1):
+            size_mb = size / (1024 * 1024)
+            try:
+                from datetime import datetime
+                fecha = datetime.fromtimestamp(os.path.getmtime(ruta)).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                fecha = "?"
+            print(f"  {i:2d}) {name:<45s} {size_mb:6.1f} MB  {fecha}")
+        total_mb = sum(s for _, _, s in backups) / (1024 * 1024)
+        print(f"\n  Total: {total_mb:.1f} MB en {len(backups)} archivos")
+        if len(backups) > 20 or total_mb > 600:
+            print("  Sugerencia: hay muchos backups, considerá podar manualmente los más viejos en db/backups/")
+    pausa()
+
+
 def opcion_mantenimiento(db_path: str | None = None):
     """Menu: mantenimiento general de la DB (backup, restore, exportar, etc)."""
     _menu_paginado("MANTENIMIENTO DB", [
         ("  -- Mantenimiento general --\n", {
-            "1": ("Relocalizar medios (cambio de raiz)", opcion_relocalizar),
-            "2": ("Calcular posición del sol (astronomía)", opcion_astronomia),
-            "3": ("Backfill end_time", opcion_backfill_end_time),
-            "4": ("Backup DB (solo backup, sin borrar)", opcion_backup_db),
-            "5": ("Restore DB desde backup", opcion_restore_db),
-            "6": ("Resetear DB (backup + limpiar)", opcion_reset_db),
-            "7": ("Exportar DB a CSV", opcion_exportar_csv),
-            "8": ("Mover/Copiar medios", opcion_mover_media),
-            "9": ("Auditar contenedores (streams faltantes)", opcion_auditar_contenedores),
+            "1": ("Gestión de rutas (relocalizar / mover / consolidar)", opcion_gestion_rutas),
+            "2": ("Backfill end_time", opcion_backfill_end_time),
+            "3": ("Backup DB (solo backup, sin borrar)", opcion_backup_db),
+            "4": ("Restore DB desde backup", opcion_restore_db),
+            "5": ("Resetear DB (backup + limpiar)", opcion_reset_db),
+            "6": ("Exportar DB a CSV", opcion_exportar_csv),
+            "7": ("Auditar contenedores (streams faltantes)", opcion_auditar_contenedores),
+            "8": ("Ver / podar backups", _ver_backups),
         }),
         ("  -- Auditoría de medios --\n", {
             "1": ("Buscar contenido repetido (audio)", opcion_repetir_contenido),
@@ -2337,6 +2728,13 @@ def opcion_backfill_end_time(db_path: str | None = None):
             )
 
         if modo == "replace":
+            # Backup automático antes de limpiar masivo
+            conn.commit()
+            conn.close()
+            bak = _auto_backup(db_path)
+            if bak:
+                print(f"  ✓ Backup automático: {os.path.basename(bak)}")
+            conn = sqlite3.connect(db_path)
             print("  Modo replace: limpiando end_time existentes...")
             conn.execute("UPDATE media SET end_time = NULL WHERE timestamp_utc IS NOT NULL")
             conn.commit()
@@ -2399,18 +2797,40 @@ def opcion_backfill_end_time(db_path: str | None = None):
 # ── Backup / Restore DB ──────────────────────────────────────────────────────
 
 def listar_backups(db_path: str | None = None) -> list[tuple[str, str, int]]:
-    """Lista archivos de backup en el directorio de la DB.
+    """Lista archivos de backup en db/backups/ (y legacy db/ para compatibilidad).
     Returns:
-        Lista de (ruta_completa, nombre_archivo, tamaño_bytes) ordenados por fecha descendente.
+        Lista de (ruta_completa, nombre_archivo, tamaño_bytes) ordenados por mtime descendente.
     """
+    import re
     db_path = leer_db(db_path)
     db_dir = os.path.dirname(db_path)
-    backups = []
-    for f in os.listdir(db_dir):
-        if f.startswith("flujos_backup_") and f.endswith(".db"):
-            ruta = os.path.join(db_dir, f)
-            backups.append((ruta, f, os.path.getsize(ruta)))
-    backups.sort(key=lambda x: x[0], reverse=True)
+    backup_dir = _directorio_backups(db_path)
+    backups: list[tuple[str, str, int]] = []
+    vistos: set[str] = set()
+    # Directorio unificado primero
+    for d in (backup_dir, db_dir):
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            # Acepta naming unificado y todos los legacy (flujos_*, flujos_backup_*, flujos_auto_*, 2026*...)
+            if f.endswith(".db") and (
+                f.startswith("flujos_") or f.startswith("flujos_backup_")
+                or f.startswith("flujos_auto") or f.startswith("flujos_autobackup")
+                or re.match(r"^\d{8}_.*\.db$", f)
+            ):
+                ruta = os.path.join(d, f)
+                if ruta in vistos or not os.path.isfile(ruta):
+                    continue
+                vistos.add(ruta)
+                try:
+                    backups.append((ruta, f, os.path.getsize(ruta)))
+                except Exception:
+                    pass
+    # Ordenar por mtime descendente (más reciente primero)
+    try:
+        backups.sort(key=lambda x: os.path.getmtime(x[0]), reverse=True)
+    except Exception:
+        backups.sort(key=lambda x: x[0], reverse=True)
     return backups
 
 
@@ -2423,11 +2843,20 @@ def opcion_backup_db(db_path: str | None = None):
         return
 
     conn = sqlite3.connect(db_path)
-    total = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+    except sqlite3.OperationalError:
+        total = 0
     conn.close()
 
+    # Mostrar backups existentes y retención
+    backups_previos = listar_backups(db_path)
     print(f"\n  DB actual:    {db_path}")
     print(f"  Registros:    {total}")
+    print(f"  Backups en {_directorio_backups(db_path)}: {len(backups_previos)} (máx 25 / 800 MB)")
+    if backups_previos:
+        total_mb = sum(s for _, _, s in backups_previos) / (1024 * 1024)
+        print(f"  Tamaño total backups: {total_mb:.1f} MB")
     print()
     if not _preguntar_sn("Crear backup"):
         print("  Cancelado.")
@@ -2436,7 +2865,9 @@ def opcion_backup_db(db_path: str | None = None):
 
     ruta = _crear_backup_manual(db_path)
     if ruta:
-        print(f"  ✅ Backup creado: {os.path.basename(ruta)}")
+        size_mb = os.path.getsize(ruta) / (1024 * 1024) if os.path.isfile(ruta) else 0
+        print(f"  ✅ Backup creado: {os.path.basename(ruta)} ({size_mb:.1f} MB)")
+        print(f"     Ubicación: {ruta}")
     else:
         print("  Backup no creado.")
 
@@ -2444,20 +2875,25 @@ def opcion_backup_db(db_path: str | None = None):
 
 
 def opcion_restore_db(db_path: str | None = None):
-    """Restaura la DB desde un backup."""
+    """Restaura la DB desde un backup (WAL-safe)."""
     db_path = leer_db(db_path)
-    db_dir = os.path.dirname(db_path)
 
     backups = listar_backups(db_path)
     if not backups:
-        print("  No hay backups disponibles en el directorio de la DB.")
+        print(f"  No hay backups disponibles en {_directorio_backups(db_path)} (ni legacy en {os.path.dirname(db_path)}).")
         pausa()
         return
 
-    print("  Backups disponibles:\n")
+    print(f"  Backups disponibles (en {_directorio_backups(db_path)} + legacy):\n")
     for i, (ruta, name, size) in enumerate(backups, 1):
         size_mb = size / (1024 * 1024)
-        print(f"  {i}) {name}  ({size_mb:.1f} MB)")
+        try:
+            mtime = os.path.getmtime(ruta)
+            from datetime import datetime
+            fecha = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            fecha = "?"
+        print(f"  {i}) {name}  ({size_mb:.1f} MB)  {fecha}  → {ruta}")
 
     print("  0) Cancelar\n")
 
@@ -2475,6 +2911,8 @@ def opcion_restore_db(db_path: str | None = None):
     backup_name = backups[sel - 1][1]
 
     print(f"\n  Esto REEMPLAZARÁ la DB actual con: {backup_name}")
+    print(f"  Origen: {backup_path}")
+    print(f"  Destino: {db_path}")
     if not _preguntar_sn("Confirmar restauracion"):
         print("  Cancelado.")
         pausa()
@@ -2482,9 +2920,43 @@ def opcion_restore_db(db_path: str | None = None):
 
     import shutil
     try:
-        # Cerrar cualquier conexión (no podemos forzarlo, pero asumimos que no hay)
-        shutil.copy2(backup_path, db_path)
+        # Backup de seguridad de la DB actual antes de pisar
+        try:
+            _auto_backup(db_path)
+        except Exception:
+            pass
+        # Checkpoint WAL de la DB actual si existe
+        if os.path.isfile(db_path):
+            try:
+                c = sqlite3.connect(db_path)
+                c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                c.close()
+            except Exception:
+                pass
+        # Restaurar con backup API (WAL-safe)
+        ok = _backup_wal_safe(backup_path, db_path)
+        if not ok:
+            # Fallback ya hecho en _backup_wal_safe; verificar
+            if not os.path.isfile(db_path):
+                raise OSError("Fallo al restaurar backup")
+        # Limpiar -wal/-shm huérfanos del destino (el backup API ya los maneja)
+        for suf in ("-wal", "-shm"):
+            p = db_path + suf
+            if os.path.isfile(p):
+                try:
+                    # Si el backup no tenía WAL, el -wal viejo es basura
+                    if not os.path.isfile(backup_path + suf):
+                        os.remove(p)
+                except Exception:
+                    pass
         print(f"  ✅ DB restaurada desde: {backup_name}")
+        # Verificar integridad rápida
+        try:
+            c = sqlite3.connect(db_path)
+            c.execute("PRAGMA integrity_check").fetchone()
+            c.close()
+        except Exception:
+            pass
     except Exception as e:
         print(f"  ❌ Error restaurando backup: {e}")
 
@@ -2670,6 +3142,10 @@ def main():
     elif comando == "check-gps":
         db_val, _ = _extract_db(resto)
         opcion_check_gps(db_val)
+
+    elif comando in ("check-data", "check-clima", "check-geo"):
+        from scripts import check_db_data
+        check_db_data.main(resto)
 
     elif comando in ("undo-ingest", "undo"):
         db_val, _ = _extract_db(resto)

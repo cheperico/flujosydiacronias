@@ -202,6 +202,37 @@ def procesar(
         conn.close()
         return
 
+    # Backup automático antes de tocar FS/DB (si va a modificar DB)
+    if mode == "mover" or update_db:
+        try:
+            conn.commit()
+            conn.close()
+            import sqlite3 as _sq
+            from datetime import datetime as _dt
+            _bdir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
+            os.makedirs(_bdir, exist_ok=True)
+            _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            _bpath = os.path.join(_bdir, f"flujos_{_ts}__autobackup.db")
+            _src = _sq.connect(db_path)
+            try:
+                _src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            _dst = _sq.connect(_bpath)
+            try:
+                _src.backup(_dst)
+                log.info("  ✓ Backup automático: %s", os.path.basename(_bpath))
+            finally:
+                _dst.close()
+            _src.close()
+            conn = abrir(db_path)
+        except Exception as e:
+            log.warning("  ⚠ No se pudo crear backup automático: %s", e)
+            try:
+                conn = abrir(db_path)
+            except Exception:
+                pass
+
     # Ejecutar por raíz
     stats_global = {
         "movidos": 0, "copiados": 0, "errores": 0,

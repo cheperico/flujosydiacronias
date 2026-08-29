@@ -180,3 +180,85 @@ class ModoHelper:
 
     def __str__(self) -> str:
         return self.mode
+
+
+# ── Resumen DRY (contadores centralizados) ───────────────────────────────────
+
+
+_TABLAS_RESUMEN = [
+    "media", "media_metadata", "media_keypoints", "media_embeddings",
+    "config", "tracks", "waypoints",
+    "telegram_chats", "telegram_messages", "telegram_media",
+]
+
+def obtener_resumen(conn: sqlite3.Connection) -> dict[str, int]:
+    """Cuenta registros de cada tabla conocida. Retorna dict tabla->count (-1 si no existe)."""
+    resumen: dict[str, int] = {}
+    for tabla in _TABLAS_RESUMEN:
+        try:
+            cnt = conn.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()[0]
+            resumen[tabla] = int(cnt)
+        except sqlite3.OperationalError:
+            resumen[tabla] = -1
+    return resumen
+
+
+def resumen_por_tipo(conn: sqlite3.Connection) -> dict[str, int]:
+    """Cuenta medios por type (image/video/audio/text/other)."""
+    try:
+        cur = conn.execute("SELECT type, COUNT(*) FROM media GROUP BY type")
+        d = {row[0] or "NULL": row[1] for row in cur.fetchall()}
+        # total
+        total = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+        d["__total__"] = int(total)
+        return d
+    except sqlite3.OperationalError:
+        return {}
+
+
+def resumen_texto(conn: sqlite3.Connection) -> str:
+    """Texto resumido para TUI: totales por tipo."""
+    d = resumen_por_tipo(conn)
+    if not d:
+        return "  (Base de datos vacía o sin schema)"
+    total = d.pop("__total__", 0)
+    imagenes = d.get("image", 0)
+    videos = d.get("video", 0)
+    audios = d.get("audio", 0)
+    textos = d.get("text", 0)
+    otros = total - imagenes - videos - audios - textos
+    return (
+        f"  Total:      {total:>6d}\n"
+        f"  Imagenes:   {imagenes:>6d}\n"
+        f"  Videos:     {videos:>6d}\n"
+        f"  Audios:     {audios:>6d}\n"
+        f"  Textos:     {textos:>6d}\n"
+        f"  Otros:      {otros:>6d}"
+    )
+
+
+# ── Path utils compartidos (relocate / mover / consolidar) ───────────────────
+
+
+def normalizar_ruta(p: str) -> str:
+    """Normaliza separadores y elimina barra final."""
+    p = os.path.normpath(p)
+    if len(p) > 2 and p.endswith(os.sep):
+        p = p[:-1]
+    return p
+
+
+def sidecar_abs(sidecar_rel: str, root: str) -> str:
+    """Convierte sidecar_xml (relativo a ingest_root) a ruta absoluta."""
+    if os.path.isabs(sidecar_rel):
+        return sidecar_rel
+    return os.path.normpath(os.path.join(root, sidecar_rel))
+
+
+def calcular_nueva_ruta(abs_path: str, old_root: str, new_root: str) -> str:
+    """Calcula nueva ruta absoluta reemplazando SOLO prefijo old_root por new_root."""
+    old_norm = normalizar_ruta(old_root)
+    new_norm = normalizar_ruta(new_root)
+    if abs_path.startswith(old_norm):
+        return new_norm + abs_path[len(old_norm):]
+    return abs_path

@@ -6,14 +6,14 @@ Procesa result.json de un export de Telegram, registra el chat, los mensajes
 y sus archivos multimedia. Opcionalmente ingiere los multimedia en la tabla media
 para que pasen por el pipeline de enriquecimiento (colores, transcripción, etc.).
 
-Si se especifica --destino, copia los archivos a una carpeta canónica durante
-la importación, evitando que queden atados al export temporal. Al re-importar
-con --mode skip, los mensajes existentes se saltan pero se recuperan los medios
-que no estaban disponibles anteriormente.
+Los archivos quedan referenciados en la carpeta del export; para agrupar o
+consolidar medios en otra ubicación usá scripts/mover_media.py o
+scripts/consolidar_medios.py. Al re-importar con --mode skip, los mensajes
+existentes se saltan pero se recuperan los medios que no estaban disponibles
+anteriormente.
 
 Uso:
     python scripts/import_telegram.py --export-path RUTA_AL_EXPORT
-    python scripts/import_telegram.py --export-path RUTA --destino D:/Medios
     python flujos.py import-telegram --export-path RUTA_AL_EXPORT
     python flujos.py tg -e RUTA
 
@@ -21,7 +21,6 @@ Args:
     --export-path / -e    Ruta al directorio del export (con result.json)
     --include-system      Incluir mensajes de sistema (default: True)
     --ingest-media        Ingerir multimedia en tabla media (default: True)
-    --destino / -d        Carpeta canónica donde copiar los archivos multimedia
     --mode                skip | update | replace (default: skip)
     --dry-run             Solo previsualizar
     --db                  Ruta a la base de datos
@@ -242,15 +241,12 @@ def ingerir_media_telegram(
     mensaje: dict,
     media_type_tg: str,       # media_type del item (photo, video_file, voice_message, etc.)
     mime_type: str,            # mime_type del item
-    destino: str | None = None,  # si se pasa, copia el archivo a esta carpeta canónica
 ) -> int | None:
     """
     Ingiere un archivo multimedia de Telegram en la tabla media.
 
-    Si ``destino`` se especifica, copia el archivo a ``{destino}/telegram/``
-    y registra la copia como filepath_absoluto (evita que quede atado al
-    export temporal). Si el archivo ya existe en destino (mismo hash), no
-    duplica.
+    Los archivos quedan referenciados en la carpeta del export. Para agrupar
+    o consolidar usá mover_media.py / consolidar_medios.py.
     Retorna el id del medio insertado, o None si falla.
     """
     abs_path = os.path.abspath(os.path.join(export_path, file_rel_path))
@@ -274,29 +270,11 @@ def ingerir_media_telegram(
                              (tipo, existente[0]))
             return existente[0]
 
-    # ── Copiar a destino canónico si corresponde ──
     filename = os.path.basename(file_rel_path)
     carpeta_original = os.path.dirname(file_rel_path).replace("\\", "/")
-    filepath_absoluto = abs_path           # valor por defecto: ruta dentro del export
+    filepath_absoluto = abs_path
     filepath_relativo = file_rel_path.replace("\\", "/")
     carpeta = carpeta_original
-
-    if destino:
-        destino_norm = os.path.abspath(destino)
-        # Subcarpeta telegram/ para mantener orden
-        dest_dir = os.path.join(destino_norm, "telegram")
-        os.makedirs(dest_dir, exist_ok=True)
-
-        dest_path = os.path.join(dest_dir, filename)
-        dest_path = _resolver_colision(dest_path, file_hash)
-
-        if not os.path.isfile(dest_path):
-            shutil.copy2(abs_path, dest_path)
-            log.debug("  Copiado a: %s", dest_path)
-
-        filepath_absoluto = dest_path
-        filepath_relativo = os.path.relpath(dest_path, destino_norm).replace("\\", "/")
-        carpeta = "telegram"
 
     # Timestamp desde el mensaje
     date_iso = mensaje.get("date", "")
@@ -344,30 +322,6 @@ def ingerir_media_telegram(
     return media_id
 
 
-def _resolver_colision(dest_path: str, file_hash: str | None) -> str:
-    """
-    Si ya existe un archivo en *dest_path* con diferente hash, agrega
-    sufijo _1, _2, etc. Si tiene el mismo hash, devuelve dest_path
-    (no hace falta copiar de nuevo).
-    """
-    MAX_INTENTOS = 999
-    if not os.path.isfile(dest_path):
-        return dest_path
-    if file_hash and sha256_archivo(dest_path) == file_hash:
-        return dest_path  # mismo archivo, reutilizar
-    # Colisión: agregar sufijo
-    base, ext = os.path.splitext(dest_path)
-    for n in range(1, MAX_INTENTOS + 1):
-        candidato = f"{base}_{n}{ext}"
-        if not os.path.isfile(candidato):
-            return candidato
-        if file_hash and sha256_archivo(candidato) == file_hash:
-            return candidato
-    # Último recurso: devolver con timestamp
-    import time
-    return f"{base}_{int(time.time())}{ext}"
-
-
 # ── Procesamiento principal ───────────────────────────────────────────
 
 def procesar_export(
@@ -379,7 +333,6 @@ def procesar_export(
     ingest_media: bool = True,
     modo: str = "skip",
     dry_run: bool = False,
-    destino: str | None = None,   # copiar media a carpeta canónica
 ) -> dict:
     """
     Procesa el export de Telegram y escribe en DB.
@@ -586,7 +539,6 @@ def procesar_export(
                 media_id = ingerir_media_telegram(
                     conn, export_path, mitem["file_relative_path"],
                     msg, mitem["media_type"], mitem.get("mime_type", ""),
-                    destino=destino,
                 )
                 if media_id:
                     # Vincular telegram_media → media
@@ -652,7 +604,6 @@ def procesar_export(
                 media_id = ingerir_media_telegram(
                     conn, export_path, file_rel, msg_min,
                     media_type_tg, mime_t or "",
-                    destino=destino,
                 )
                 if media_id:
                     conn.execute(
@@ -773,11 +724,6 @@ def crear_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--db", help="Ruta a la base de datos")
     p.add_argument("--verbose", "-v", action="store_true", help="Modo verbose")
-    p.add_argument(
-        "--destino", "-d",
-        help="Carpeta canónica donde copiar los archivos multimedia "
-             "(evita que queden atados al export temporal)",
-    )
     return p
 
 
@@ -833,10 +779,6 @@ def main(argv: list[str] | None = None):
     if args.dry_run:
         log.info("── DRY RUN ──")
 
-    if args.destino:
-        args.destino = os.path.abspath(args.destino)
-        os.makedirs(os.path.join(args.destino, "telegram"), exist_ok=True)
-
     stats = procesar_export(
         conn,
         export_path,
@@ -845,7 +787,6 @@ def main(argv: list[str] | None = None):
         ingest_media=args.ingest_media,
         modo=args.mode,
         dry_run=args.dry_run,
-        destino=args.destino,
     )
 
     if args.dry_run:
