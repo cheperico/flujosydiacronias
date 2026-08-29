@@ -15,6 +15,7 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/rutas.php';
 $pdo = db();
 
 $municipio = isset($_GET['municipio']) ? trim($_GET['municipio']) : '';
@@ -126,7 +127,7 @@ foreach ($tipos as $tipo) {
     // WHERE dinámico: si hay filtros previos, concatenar con AND
     $whereTipo = ($where ? ' AND' : ' WHERE') . ' m.tipo = :tipo';
     $sql = "SELECT m.id, m.archivo, m.tipo, m.subtipo, m.carpeta,
-                   m.ruta_relativa, m.tamano_bytes, m.duracion_seg,
+                   m.ruta_absoluta, m.ruta_relativa, m.tamano_bytes, m.duracion_seg,
                    m.fecha, m.hora,
                    m.color_1, m.color_1_hex,
                    m.provincia, m.municipio, m.localidad,
@@ -151,13 +152,11 @@ foreach ($tipos as $tipo) {
 }
 
 // Disponibilidad web: para el bloque 360 solo se devuelven los videos cuyo
-// archivo existe en media/<carpeta>/<archivo> (los demás son links rotos).
+// archivo se resuelve en disco (absoluta local en snapshot-local, media/... en
+// deploy) — los demás serían links rotos en el visor.
 if (in_array('360', $subtipos, true) && isset($resultados['video'])) {
     $disponibles = array_filter($resultados['video'], function ($m) {
-        $carpeta = str_replace('\\', '/', trim((string)$m['carpeta'], "/\\ \t\n\r\0\x0B"));
-        $archivo = (string)$m['archivo'];
-        if ($archivo === '') return false;
-        return file_exists(__DIR__ . '/../media/' . ($carpeta !== '' ? $carpeta . '/' : '') . $archivo);
+        return flujos_resolver_archivo($m['ruta_absoluta'], $m['carpeta'], $m['archivo']) !== null;
     });
     $resultados['video'] = array_slice(array_values($disponibles), 0, $limite);
 }

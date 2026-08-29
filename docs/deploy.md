@@ -6,9 +6,6 @@
 > visualización web (sin sufijo de versión). `deploy/` es a la vez la **fuente**
 > del sitio (HTML/PHP/JS versionados en git) y el **destino** del exportador
 > (medios copiados y snapshot `visualizacion.db` generados — ignorados por git).
-> El spec portable del motor de loop se regenera desde el TUI a `deploy/spec.json`
-> (la carpeta `pruebas/` con el prototipo `prueba_loop.html`/`loop.php` fue
-> eliminada en la limpieza del workspace — los vigentes viven en `deploy/`).
 
 ## Propósito
 
@@ -20,8 +17,8 @@ DB real del pipeline — es un snapshot desacoplado para la web.
 - Lienzo interactivo (`index.html` + `app.js`): bloques en coordenadas mundo,
   paletas por hora, nube de tags, slideshow de medios, mensajes Telegram.
 - 7 endpoints PHP que sirven el snapshot (`visualizacion.db`) a la SPA.
-- Spec portable del motor de loop (`deploy/spec.json`): valida `spec.json` desde
-  el TUI (Visualizaciones → Exportar → Regenerar spec), sin TouchDesigner.
+- El spec del motor de loop para TouchDesigner se genera en runtime por
+  `scripts/td/puente_td.py` (fluir) → `td/spec_fluir.json`; no vive en el deploy.
 
 ---
 
@@ -52,8 +49,7 @@ deploy/
 ├── css/estilos.css
 ├── js/app.js                   # Lógica del lienzo (bloques, paletas, FLOW)
 ├── db/visualizacion.db         # SNAPSHOT exportado (generado, no versionar) — ahora incluye tabla keypoints
-├── media/                      # Medios copiados por el deploy (generado)
-└── spec.json                   # Spec portable del motor de loop (generada, no versionar)
+└── media/                      # Medios copiados por el deploy (generado)
 ```
 > El exportador es **genérico** (sirve a cualquier implementación web, no solo
 > esta) y vive en `scripts/exportar_visualizacion.py` (fuera de `deploy/`). El
@@ -63,9 +59,9 @@ deploy/
 
 ---
 
-## Cómo regenerar (2 pasos, tras tocar la DB principal)
+## Cómo regenerar (tras tocar la DB principal)
 
-El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
+El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Un solo paso:
 
 1. **Re-exportar el snapshot SQLite**
    ```bash
@@ -74,33 +70,24 @@ El snapshot se genera desde `db/flujos.db` (FUENTE de verdad). Pasos:
    Lee `db/flujos.db` y **recrea** `visualizacion.db` por completo (medios,
    categorias, telegram_messages, **keypoints** — posiciones materializadas con
    `media.lat/lon` o interpolación GPX).
-   - **Deploy genérico (default)**: escribe en `deploy/` (raíz del proyecto)
-     copiando los medios a `deploy/media/...`. `--transcode` transcodifica videos
-     grandes/360° a MP4/H.264 web (opt-in; sin él solo copia tal cual).
+   - **Deploy genérico (default) — HOSTING**: escribe en `deploy/` (raíz del
+     proyecto) copiando los medios a `deploy/media/...`. `--transcode` transcodifica
+     videos grandes/360° a MP4/H.264 web (opt-in; sin él solo copia tal cual).
      `--transcode-360-largo 1440` (default) deja los 360 en 1440×720 con tope de
      bitrate y keyframes para seek. El export es **incremental** (skip-if-exists:
      no re-transcodifica archivos ya presentes). `--deploy-dir <carpeta>` cambia
-     el destino; `--dry-run` previsualiza sin escribir.
-   - **Snapshot local (dev)**: `--snapshot-local` escribe
-     `deploy/db/visualizacion.db` con rutas absolutas de Windows, **sin** copiar
-     medios ni transcodificar. ⚠️ Al compartir archivo con el modo deploy, el
-     último export gana — para subir a hosting usar siempre el modo deploy.
-     `servir_medio.php` resuelve como fallback `media/<carpeta>/<archivo>`, así
-     que el hosting funciona aunque la DB guarde rutas absolutas locales (el
-     fallback cubre imágenes, videos y audios).
-
-2. **Regenerar el spec del motor de loop** (en PowerShell forzar UTF-8 por
-   caracteres de caja `─`):
-   ```powershell
-   $env:PYTHONIOENCODING='utf-8'
-   python scripts/ai_media/loop_db.py --horas 7 16 13 18 --salida deploy/spec.json
-   ```
-   `loop_db.py` lee `db/flujos.db` (solo lectura), calcula la hora de día de cada
-   medio, genera los chiches y produce `spec.json` (portable: web de prueba y
-   TouchDesigner). Los `--horas` definen los arcos; los del prototipo actual son
-   `7 16 13 18`. La spec queda en `deploy/spec.json` (la carpeta `pruebas/` con
-   `prueba_loop.html`/`loop.php` fue eliminada en la limpieza del workspace);
-   TD genera la suya propia en `td/spec_fluir.json`.
+     el destino; `--dry-run` previsualiza sin escribir. Para shared hosting hay que
+     subir `deploy/` completo (DB + `media/` + fuentes), porque la DB referencia
+     `media/<carpeta>/<archivo>`.
+   - **Snapshot local (dev) — LOCAL COMPLETO**: `--snapshot-local` escribe
+     `deploy/db/visualizacion.db` con rutas **absolutas** locales, **sin** copiar
+     medios ni transcodificar. La web consume los medios desde su ubicación local
+     (imágenes, audios, videos y el bloque **360°**): la resolución de rutas está
+     compartida en `deploy/includes/rutas.php` (`flujos_resolver_archivo`), usada
+     por `servir_medio.php` (servir binario) y `medios_filtrados.php` (disponibilidad
+     360°). ⚠️ Solo funciona en la misma máquina (las rutas locales no existen en
+     otro equipo/hosting). ⚠️ Al compartir archivo con el modo deploy, el último
+     export gana — para hosting usar siempre el modo deploy.
 
 > Al regenerar con los datos limpios (translategemma aplicado en la DB principal)
 > se propagan las descripciones ES correctas y los 1522 medios completos a la web
@@ -211,8 +198,8 @@ Cualquier Apache con PHP (PDO SQLite) apuntando a `deploy/`. El `.htaccess`:
 - Deniega `.db|sqlite|sqlite3|json` (protege `visualizacion.db`)
 - Deniega `.htaccess|htpasswd|md|py|sh`
 El snapshot es lo único que se sirve (vía PHP), los fuentes `.py/.md` quedan
-fuera de alcance por HTTP. La spec portable del motor (`deploy/spec.json`) es
-una herramienta de prueba regenerable desde el TUI, no parte del deploy.
+fuera de alcance por HTTP. El spec del motor de loop vive en TD (`td/spec_fluir.json`,
+generado en runtime por `puente_td.py`), no en el deploy.
 
 ---
 

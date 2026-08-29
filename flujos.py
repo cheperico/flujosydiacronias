@@ -2610,15 +2610,14 @@ def opcion_mapas(db_path: str | None = None):
 
 
 def opcion_exportar_visualizacion(db_path: str | None = None):
-    """Menu: exportar el snapshot web (visualizacion.db) y el spec del loop.
+    """Menu: exportar el snapshot web (visualizacion.db).
 
-    Paso 1: exportar_visualizacion.py (snapshot SQLite de flujos.db; deploy
-    genérico por defecto a deploy/, con copia de medios y transcode opcional).
-    Paso 2: loop_db.py --salida deploy/spec.json (spec del motor de loop portable).
+    exportar_visualizacion.py: snapshot SQLite de flujos.db; deploy genérico por
+    defecto a deploy/, con copia de medios y transcode opcional. El spec del motor
+    de loop ya no se genera acá: TD lo genera en runtime (puente_td.py → td/spec_fluir.json).
     """
     base = os.path.dirname(__file__)
     exportador = os.path.join(base, "scripts", "exportar_visualizacion.py")
-    loop_db = os.path.join(base, "scripts", "ai_media", "loop_db.py")
 
     def _deploy_dir_custom() -> str | None:
         ruta = input("  Carpeta de deploy (Enter = deploy/ por defecto): ").strip()
@@ -2655,16 +2654,6 @@ def opcion_exportar_visualizacion(db_path: str | None = None):
         subprocess.run([sys.executable, exportador, "--snapshot-local"])
         pausa()
 
-    def _spec_loop(db):
-        # Forzar UTF-8 en Windows por los caracteres de caja del log.
-        env = dict(os.environ)
-        env["PYTHONIOENCODING"] = "utf-8"
-        subprocess.run([sys.executable, loop_db,
-                        "--horas", "7", "16", "13", "18",
-                        "--salida", os.path.join(base, "deploy", "spec.json")],
-                       env=env)
-        pausa()
-
     def _deploy_dry(db):
         subprocess.run([sys.executable, exportador, "--dry-run"])
         pausa()
@@ -2673,8 +2662,7 @@ def opcion_exportar_visualizacion(db_path: str | None = None):
         "1": ("Deploy a deploy/ (pregunta si transcodificar)", _deploy_default),
         "2": ("Deploy a otra carpeta (pregunta si transcodificar)", _deploy_custom),
         "3": ("Re-exportar snapshot local (deploy/db, sin copiar medios)", _snapshot),
-        "4": ("Regenerar spec del loop (deploy/spec.json)", _spec_loop),
-        "5": ("Previsualizar deploy (dry-run)", _deploy_dry),
+        "4": ("Previsualizar deploy (dry-run)", _deploy_dry),
     }, db_path, intro=(
         "Exporta un snapshot de flujos.db para la web portable (ver docs/deploy.md).\n"
         "  deploy/ es hub + panel + keypoints: index.html (hub) → panel/index.html\n"

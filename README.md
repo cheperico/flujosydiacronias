@@ -236,8 +236,7 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
       ├─ 1. Deploy a deploy/ (pregunta si transcodificar)
       ├─ 2. Deploy a otra carpeta (pregunta si transcodificar)
       ├─ 3. Re-exportar snapshot local (deploy/db, sin copiar medios)
-      ├─ 4. Regenerar spec del loop (deploy/spec.json)
-      ├─ 5. Previsualizar deploy (dry-run)
+      ├─ 4. Previsualizar deploy (dry-run)
       └─ 0. Volver
   ├─ 3. TouchDesigner (puente OSC)
   │   ├─ 1. Enviar elecciones (horas, municipios, colores, tags, días, clima)

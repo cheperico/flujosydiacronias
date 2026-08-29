@@ -7,6 +7,42 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 51] — 2026-08-29 — Deploy en dos modos (local completo / hosting) + limpieza TUI
+
+### Añadido
+- **Deploy local completo sin copiar medios**: nuevo `deploy/includes/rutas.php`
+  con `flujos_resolver_archivo($ruta_absoluta, $carpeta, $archivo)` — resolución
+  compartida de rutas (absoluta local en `--snapshot-local`, `media/<carpeta>/<archivo>`
+  en deploy), usada por `servir_medio.php` (servir binario) y `medios_filtrados.php`
+  (disponibilidad 360°). Con esto el bloque **Videos 360° funciona también en el
+  deploy local** (antes solo en hosting, porque el filtro solo miraba `deploy/media/`).
+- **Dos modos de deploy documentados** (`docs/deploy.md` § Cómo regenerar):
+  **LOCAL COMPLETO** (`--snapshot-local`: DB con rutas absolutas, consume los medios
+  desde su ubicación local, no copia; solo sirve en la misma máquina) y **HOSTING**
+  (modo deploy: copia a `deploy/media/` + DB con `media/...`; subir `deploy/` completo).
+
+### Cambiado
+- `deploy/api/servir_medio.php` y `deploy/api/medios_filtrados.php`: refactor a usar
+  `flujos_resolver_archivo()` (un único criterio de resolución: "disponible" y
+  "se sirve" siempre coinciden). `medios_filtrados` ahora incluye `ruta_absoluta`
+  en el SELECT.
+
+### Corregido
+- **Etiquetas de videos en el deploy** (`scripts/exportar_visualizacion.py`): el
+  SELECT de `media_metadata` y el `unir_keywords()` de `type='video'` ahora incluyen
+  `ia_keywords_video` — los videos que solo tienen esa clave ya no quedan con
+  `keywords NULL` en el snapshot (antes ~26% de videos sin etiquetas en la web).
+
+### Eliminado
+- **TUI: opción "Regenerar spec del loop (deploy/spec.json)"** (`flujos.py`, menú
+  EXPORTAR VISUALIZACION WEB): obsoleta — `deploy/spec.json` y `api/loop.php` ya
+  no existen (el prototipo `pruebas/` se eliminó en la limpieza del workspace) y el
+  spec del loop para TD lo genera `puente_td.py` en runtime → `td/spec_fluir.json`.
+  El menú queda: 1) Deploy a `deploy/` 2) Deploy a otra carpeta 3) Snapshot local
+  4) Dry-run. `README.md` y `docs/deploy.md` actualizados.
+
+---
+
 ## [Entrega 50] — 2026-08-28 — Deploy hub con keypoints + offset -5s en transcripción
 
 ### Añadido
