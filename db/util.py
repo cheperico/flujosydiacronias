@@ -241,11 +241,36 @@ def resumen_texto(conn: sqlite3.Connection) -> str:
 
 
 def normalizar_ruta(p: str) -> str:
-    """Normaliza separadores y elimina barra final."""
+    """Normaliza separadores, elimina barra final y normaliza case en Windows."""
     p = os.path.normpath(p)
     if len(p) > 2 and p.endswith(os.sep):
         p = p[:-1]
+    # En Windows, normalizar case para comparaciones
+    if os.name == "nt":
+        p = os.path.normcase(p)
     return p
+
+
+def _ruta_es_prefijo(abs_path: str, old_root: str) -> bool:
+    """True si abs_path está dentro de old_root (con separador), case-insensitive en Windows."""
+    old_norm = normalizar_ruta(old_root)
+    # Necesitamos comparar con normcase pero preservar longitud original para slicing
+    # Usamos normpath sin normcase para medir len, pero comparamos normcased
+    abs_norm = os.path.normpath(abs_path)
+    if os.name == "nt":
+        if abs_norm.lower().startswith(old_norm.lower()):
+            # Verificar separador: exacto o con /
+            resto = abs_norm[len(os.path.normpath(old_root)):]
+            if resto == "" or resto.startswith(os.sep):
+                return True
+            # También el caso donde old_root ya incluía separador
+            return resto == "" or abs_norm[len(old_norm):].startswith(os.sep) or len(abs_norm) == len(old_norm)
+        return False
+    else:
+        # POSIX: case-sensitive, requiere separador
+        if abs_norm == old_norm:
+            return True
+        return abs_norm.startswith(old_norm + os.sep)
 
 
 def sidecar_abs(sidecar_rel: str, root: str) -> str:
@@ -256,7 +281,30 @@ def sidecar_abs(sidecar_rel: str, root: str) -> str:
 
 
 def calcular_nueva_ruta(abs_path: str, old_root: str, new_root: str) -> str:
-    """Calcula nueva ruta absoluta reemplazando SOLO prefijo old_root por new_root."""
+    """Calcula nueva ruta absoluta reemplazando SOLO prefijo old_root por new_root (con separador)."""
+    if not _ruta_es_prefijo(abs_path, old_root):
+        return abs_path
+    old_norm_fs = os.path.normpath(old_root)
+    new_norm_fs = os.path.normpath(new_root)
+    # Preservar case original de new_root, pero usar longitud de old_norm_fs para slicing
+    # En Windows, slicing es seguro porque normpath no cambia longitud salvo separadores
+    # Usamos len(old_norm_fs) que coincide con el prefijo real en abs_path (case puede diferir)
+    # Buscamos el prefijo real en abs_path con lower
+    if os.name == "nt":
+        # Encontrar prefijo ignorando case
+        abs_norm = os.path.normpath(abs_path)
+        # Si abs empieza con old (case-insensitive), reemplazar conservando resto con separador correcto
+        if abs_norm.lower().startswith(old_norm_fs.lower()):
+            resto = abs_norm[len(old_norm_fs):]
+            # Si old termina sin sep y resto no empieza con sep, es porque es exact match o subpath
+            # Reconstruir con new_norm_fs + resto (resto ya incluye sep si es subcarpeta)
+            return os.path.normpath(new_norm_fs + resto)
+    else:
+        if abs_path == old_norm_fs:
+            return new_norm_fs
+        if abs_path.startswith(old_norm_fs + os.sep):
+            return new_norm_fs + abs_path[len(old_norm_fs):]
+    # Fallback al método simple
     old_norm = normalizar_ruta(old_root)
     new_norm = normalizar_ruta(new_root)
     if abs_path.startswith(old_norm):

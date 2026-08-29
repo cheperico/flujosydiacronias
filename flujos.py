@@ -578,12 +578,17 @@ def opcion_listar(db_path: str | None = None):
     from scripts import query
     db_flag = ["--db", db_path] if db_path else []
 
-    def _preguntar_limit() -> list[str]:
-        lim = input("  Límite (Enter = sin límite, ej 30): ").strip()
+    def _preguntar_limit(default: int = 50) -> list[str]:
+        lim = input(f"  Límite (Enter = {default}, 0 = sin límite, máx 500): ").strip()
+        if lim == "":
+            return ["--limit", str(default)]
+        if lim == "0":
+            return []
         if lim.isdigit() and int(lim) > 0:
             n = max(1, min(int(lim), 500))
             return ["--limit", str(n)]
-        return []
+        print(f"  Valor inválido, usando {default}.")
+        return ["--limit", str(default)]
 
     def _buscar_texto(db):
         t = input("  Texto a buscar: ").strip()
@@ -684,11 +689,35 @@ def opcion_relocalizar(db_path: str | None = None):
             pass
         conn.close()
 
+    # Permitir --old-root (si config está vacío o es incorrecto)
+    old_root = input("  Raíz anterior (vacío = usar ingest_root de la DB): ").strip()
     new_root = input("  Nueva raiz: ").strip()
     if not new_root:
         print("  Cancelado.")
         pausa()
         return
+    # Sugerir consolidar si hay múltiples raíces
+    try:
+        conn = sqlite3.connect(db_path)
+        raices = set()
+        for (fp,) in conn.execute("SELECT filepath_absoluto FROM media"):
+            # Detectar raíz heurística básica: 2 niveles desde unidad
+            p = os.path.normpath(fp)
+            parts = p.split(os.sep)
+            # En Windows: C: + Users + Federico + Desktop + Flujos + ... → raíz = hasta item 4
+            if len(parts) >= 4:
+                raiz_guess = os.sep.join(parts[:4])
+                raices.add(raiz_guess)
+        conn.close()
+        if len(raices) > 3:
+            print(f"  ⚠ Detectadas {len(raices)} raíces distintas (ej: {list(raices)[:2]}).")
+            print("    Si los medios están dispersos (Telegram/Testeos), usá Gestión de rutas → 3) Consolidar")
+            if not _preguntar_sn("Continuar con relocalizar simple de todos modos"):
+                print("  Cancelado — usá Consolidar.")
+                pausa()
+                return
+    except Exception:
+        pass
 
     if not os.path.isdir(new_root):
         r = input(f"  La carpeta '{new_root}' no existe. ?Continuar de todos modos? (s/N): ").strip().lower()
@@ -700,12 +729,18 @@ def opcion_relocalizar(db_path: str | None = None):
     dry_run = _preguntar_sn("Solo previsualizar (dry-run)")
 
     from scripts import relocate
-    relocate.main(["--new-root", new_root] + (["--dry-run"] if dry_run else []))
+    args = ["--db", db_path, "--new-root", new_root]
+    if old_root:
+        args += ["--old-root", old_root]
+    if dry_run:
+        args += ["--dry-run"]
+    relocate.main(args)
 
     pausa()
 
 
 def opcion_check_db(db_path: str | None = None):
+    """Inspección rápida (DRY) + salud básica."""
     limpiar_pantalla()
     print("=== INSPECCION DE BASE DE DATOS ===\n")
     db_path = leer_db(db_path)
@@ -715,23 +750,59 @@ def opcion_check_db(db_path: str | None = None):
         return
 
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     try:
+        # Resumen por tipo
         print(resumen_db(conn))
-    except sqlite3.OperationalError as e:
-        print(f"  Error: {e}")
-    conn.close()
-
-    print("\n  Ultimos registros:")
-    try:
-        conn = sqlite3.connect(db_path)
+        # Totales por tabla (unificado con check_db.py)
+        try:
+            from db.util import obtener_resumen
+            resumen = obtener_resumen(conn)
+            print("\n  Por tabla:")
+            for t in ["media", "media_metadata", "media_keypoints", "media_embeddings", "tracks", "waypoints", "telegram_messages", "telegram_media"]:
+                cnt = resumen.get(t, -1)
+                if cnt >= 0 and cnt > 0:
+                    print(f"    {t:<22s} {cnt:>6d}")
+        except Exception:
+            pass
+        # Salud: batches, GPS, hash colisiones
+        try:
+            batch_cnt = conn.execute("SELECT COUNT(DISTINCT ingest_batch_id) FROM media WHERE ingest_batch_id IS NOT NULL").fetchone()[0]
+            null_batch = conn.execute("SELECT COUNT(*) FROM media WHERE ingest_batch_id IS NULL").fetchone()[0]
+            print(f"\n  Batches: {batch_cnt} (legacy sin batch: {null_batch})")
+        except Exception:
+            pass
+        try:
+            gps_con = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL").fetchone()[0]
+            gps_sin = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NULL").fetchone()[0]
+            print(f"  GPS: con {gps_con} / sin {gps_sin}")
+            # Signo inválido (Argentina debe ser negativo)
+            bad_lat = conn.execute("SELECT COUNT(*) FROM media WHERE latitude > 0").fetchone()[0]
+            bad_lon = conn.execute("SELECT COUNT(*) FROM media WHERE longitude > 0").fetchone()[0]
+            if bad_lat or bad_lon:
+                print(f"  ⚠ Coordenadas con signo positivo (revisar fix_gps_sign): lat>0={bad_lat} lon>0={bad_lon}")
+        except Exception:
+            pass
+        try:
+            # Hash duplicado (debería ser único)
+            dup_hash = conn.execute(
+                "SELECT file_hash, COUNT(*) c FROM media GROUP BY file_hash HAVING c>1 LIMIT 3"
+            ).fetchall()
+            if dup_hash:
+                print(f"  ⚠ Hash duplicado: {len(dup_hash)} grupos (ej: {dup_hash[0][0][:12]}...)")
+        except Exception:
+            pass
+        print("\n  Ultimos registros:")
         cursor = conn.execute(
             "SELECT id, filename_original, type, author, timestamp_utc FROM media ORDER BY id DESC LIMIT 5"
         )
         for row in cursor:
             print(f"  #{row[0]:>6d} [{row[2]:6s}] {row[1]} - {row[3] or '?'}")
-        conn.close()
+        print("\n  Tip: para detalle por tabla usá 2) Listar → 8) Columnas, o `python scripts/check_db.py --verbose --limit 20`")
     except sqlite3.OperationalError as e:
         print(f"  Error: {e}")
+    finally:
+        conn.close()
 
     pausa()
 
@@ -920,17 +991,18 @@ def opcion_detalle_db(db_path: str | None = None):
         cols = [row[1] for row in conn.execute("PRAGMA table_info(media)")]
         print(f"  {len(cols)} columnas en media\n")
 
-        # Pedir cantidad con clamp 1..200
+        # Pedir cantidad con clamp 1..200 y mensaje claro
+        n_raw = input("  Cantidad de registros a mostrar (default 10, máx 200): ").strip() or "10"
         try:
-            n_raw = input("  Cantidad de registros a mostrar (default 10, máx 200): ").strip() or "10"
-            n = int(n_raw)
+            n_req = int(n_raw)
         except ValueError:
-            n = 10
-        n = max(1, min(n, 200))
-        if n != int(n_raw) if n_raw.isdigit() else False:
-            pass
-        if n == 200:
+            print(f"  '{n_raw}' no es número, usando 10.")
+            n_req = 10
+        n = max(1, min(n_req, 200))
+        if n_req > 200:
             print("  (limitado a 200)")
+        elif n_req != n:
+            print(f"  (ajustado a {n})")
 
         cursor = conn.execute(
             "SELECT * FROM media ORDER BY id DESC LIMIT ?",
@@ -952,25 +1024,34 @@ def opcion_detalle_db(db_path: str | None = None):
                 val = row[col]
                 if val is not None:
                     val_str = str(val)
-                    if len(val_str) > 60:
-                        val_str = val_str[:57] + "..."
-                    print(f"    {col:<25s} {val_str}")
+                    # Truncar 100, pero preservar rutas completas con indicación
+                    if col in ("filepath_absoluto", "filepath_relativo", "sidecar_xml") and len(val_str) > 120:
+                        # Mostrar completo para depurar rutas
+                        print(f"    {col:<25s} {val_str}")
+                    else:
+                        if len(val_str) > 100:
+                            val_str = val_str[:97] + "..."
+                        print(f"    {col:<25s} {val_str}")
             if ver_meta:
-                # metadata
+                # metadata — mostrar 10 primeras, trunc 100
                 metas = conn.execute(
-                    "SELECT key, substr(value,1,80) FROM media_metadata WHERE media_id=? ORDER BY key",
+                    "SELECT key, substr(value,1,100) FROM media_metadata WHERE media_id=? ORDER BY key LIMIT 10",
                     (row["id"],),
                 ).fetchall()
+                total_metas = conn.execute("SELECT COUNT(*) FROM media_metadata WHERE media_id=?", (row["id"],)).fetchone()[0]
                 if metas:
-                    print(f"    -- metadata ({len(metas)} claves) --")
+                    print(f"    -- metadata ({total_metas} claves, mostrando {len(metas)}) --")
                     for k, v in metas:
                         print(f"      {k:<25s} {v}")
+                    if total_metas > len(metas):
+                        print(f"      ... ({total_metas - len(metas)} más)")
                 kps = conn.execute(
-                    "SELECT key, timestamp_offset_secs, substr(value,1,60) FROM media_keypoints WHERE media_id=? ORDER BY timestamp_offset_secs LIMIT 5",
+                    "SELECT key, timestamp_offset_secs, substr(value,1,80) FROM media_keypoints WHERE media_id=? ORDER BY timestamp_offset_secs LIMIT 10",
                     (row["id"],),
                 ).fetchall()
+                total_kp = conn.execute("SELECT COUNT(*) FROM media_keypoints WHERE media_id=?", (row["id"],)).fetchone()[0]
                 if kps:
-                    print(f"    -- keypoints ({len(kps)} primeros) --")
+                    print(f"    -- keypoints ({total_kp} total, mostrando {len(kps)}) --")
                     for k, off, v in kps:
                         print(f"      [{k}] +{off:.1f}s: {v}")
             print()
@@ -1059,6 +1140,14 @@ def opcion_detalle_por_id(db_path: str | None = None):
     pausa()
 
 
+def _tabla_existe(conn: sqlite3.Connection, tabla: str) -> bool:
+    try:
+        conn.execute(f"SELECT 1 FROM {tabla} LIMIT 1")
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
 def opcion_undo_ingest(db_path: str | None = None):
     """Menu para deshacer una ingesta (medios o GPX)."""
     limpiar_pantalla()
@@ -1131,8 +1220,43 @@ def opcion_undo_ingest(db_path: str | None = None):
                 conn.close()
                 pausa()
                 return
-
-            confirm = input(f"  Esto borrara TODOS los medios del batch #{bid}. Confirmar? (s/N): ").strip().lower()
+            # Validar que existe
+            if not any(str(b[0]) == str(bid) for b in batches):
+                print(f"  Batch #{bid} no encontrado.")
+                conn.close()
+                pausa()
+                return
+            # Preview de cascada
+            try:
+                b_count = conn.execute("SELECT COUNT(*) FROM media WHERE ingest_batch_id=?", (bid,)).fetchone()[0]
+                meta_cnt = conn.execute(
+                    "SELECT COUNT(*) FROM media_metadata WHERE media_id IN (SELECT id FROM media WHERE ingest_batch_id=?)",
+                    (bid,),
+                ).fetchone()[0]
+                kp_cnt = conn.execute(
+                    "SELECT COUNT(*) FROM media_keypoints WHERE media_id IN (SELECT id FROM media WHERE ingest_batch_id=?)",
+                    (bid,),
+                ).fetchone()[0]
+                emb_cnt = conn.execute(
+                    "SELECT COUNT(*) FROM media_embeddings WHERE media_id IN (SELECT id FROM media WHERE ingest_batch_id=?)",
+                    (bid,),
+                ).fetchone()[0]
+                tg_cnt = conn.execute(
+                    "SELECT COUNT(*) FROM telegram_media WHERE media_id IN (SELECT id FROM media WHERE ingest_batch_id=?)",
+                    (bid,),
+                ).fetchone()[0] if _tabla_existe(conn, "telegram_media") else 0
+                # Desglose por tipo
+                tipos = conn.execute(
+                    "SELECT type, COUNT(*) FROM media WHERE ingest_batch_id=? GROUP BY type", (bid,)
+                ).fetchall()
+                print(f"\n  Batch #{bid}: {b_count} medios")
+                for t, c in tipos:
+                    print(f"    - {t}: {c}")
+                print(f"  En cascada se borrarán: {meta_cnt} metadata, {kp_cnt} keypoints, {emb_cnt} embeddings, {tg_cnt} links telegram")
+                print("  (ON DELETE CASCADE / SET NULL)\n")
+            except Exception:
+                pass
+            confirm = input(f"  Esto BORRARÁ los {b_count} medios del batch #{bid} + datos derivados. Confirmar? (s/N): ").strip().lower()
             if confirm != "s":
                 print("  Cancelado.")
                 conn.close()
@@ -1146,9 +1270,39 @@ def opcion_undo_ingest(db_path: str | None = None):
             if bak:
                 print(f"  ✓ Backup automático: {os.path.basename(bak)}")
             conn = sqlite3.connect(db_path)
-            deleted = conn.execute("DELETE FROM media WHERE ingest_batch_id = ?", (bid,)).rowcount
-            conn.commit()
-            print(f"  Eliminados {deleted} medios del batch #{bid}.")
+            try:
+                conn.execute("BEGIN")
+                deleted = conn.execute("DELETE FROM media WHERE ingest_batch_id = ?", (bid,)).rowcount
+                # Actualizar current_ingest_batch si apuntaba al borrado
+                try:
+                    cur_val = conn.execute("SELECT value FROM config WHERE key='current_ingest_batch'").fetchone()
+                    if cur_val and str(cur_val[0]) == str(bid):
+                        # Setear al batch más reciente restante, o borrar si no quedan
+                        nxt = conn.execute(
+                            "SELECT ingest_batch_id FROM media WHERE ingest_batch_id IS NOT NULL ORDER BY ingested_at DESC LIMIT 1"
+                        ).fetchone()
+                        if nxt:
+                            conn.execute(
+                                "INSERT OR REPLACE INTO config (key, value) VALUES ('current_ingest_batch', ?)",
+                                (str(nxt[0]),),
+                            )
+                            print(f"  current_ingest_batch actualizado a {nxt[0]}")
+                        else:
+                            conn.execute("DELETE FROM config WHERE key='current_ingest_batch'")
+                            print("  current_ingest_batch eliminado (no quedan batches)")
+                except Exception:
+                    pass
+                conn.commit()
+                if deleted == 0:
+                    print(f"  Batch #{bid} ya estaba vacío (0 eliminados).")
+                else:
+                    print(f"  Eliminados {deleted} medios del batch #{bid} + cascada.")
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                print(f"  Error al borrar batch: {e}")
 
         elif codigo[0] == "t":
             # Deshacer track GPX
@@ -1160,18 +1314,46 @@ def opcion_undo_ingest(db_path: str | None = None):
                 pausa()
                 return
 
-            # Verificar que existe
+            # Verificar que existe y leer rango temporal
             track = conn.execute(
-                "SELECT id, name FROM tracks WHERE id = ?", (tid,)
+                "SELECT id, name, start_time, end_time FROM tracks WHERE id = ?", (tid,)
             ).fetchone()
             if not track:
                 print(f"  Track #{tid} no encontrado.")
                 conn.close()
                 pausa()
                 return
-
-            track_nombre = track[1]
-            confirm = input(f"  Esto borrara el track \"{track_nombre}\" y sus waypoints. Confirmar? (s/N): ").strip().lower()
+            track_nombre, track_start, track_end = track[1], track[2], track[3]
+            # Contar waypoints
+            try:
+                wp_cnt = conn.execute("SELECT COUNT(*) FROM waypoints WHERE track_id=?", (tid,)).fetchone()[0]
+            except sqlite3.OperationalError:
+                wp_cnt = conn.execute("SELECT COUNT(*) FROM waypoints").fetchone()[0] if _tabla_existe(conn, "waypoints") else 0
+            # Estimar medios afectados (track_gps dentro del rango)
+            try:
+                if track_start and track_end:
+                    cnt_gps_rango = conn.execute(
+                        "SELECT COUNT(*) FROM media WHERE geolocation_source='track_gps' AND timestamp_utc BETWEEN ? AND ?",
+                        (track_start, track_end),
+                    ).fetchone()[0]
+                    cnt_interp_rango = conn.execute(
+                        "SELECT COUNT(*) FROM media WHERE geolocation_source='track_interpolado' AND timestamp_utc BETWEEN ? AND ?",
+                        (track_start, track_end),
+                    ).fetchone()[0]
+                else:
+                    cnt_gps_rango = conn.execute("SELECT COUNT(*) FROM media WHERE geolocation_source='track_gps'").fetchone()[0]
+                    cnt_interp_rango = conn.execute("SELECT COUNT(*) FROM media WHERE geolocation_source='track_interpolado'").fetchone()[0]
+                cnt_kp_interp = conn.execute("SELECT COUNT(*) FROM media_keypoints WHERE key='ubicacion_video'").fetchone()[0]
+                print(f"\n  Track #{tid} \"{track_nombre}\" — {wp_cnt} waypoints — rango {track_start} → {track_end}")
+                print(f"  Afectados estimados: {cnt_gps_rango} medios track_gps en rango, {cnt_interp_rango} track_interpolado, {cnt_kp_interp} keypoints ubicacion_video totales")
+                if track_start and track_end:
+                    print("  (solo se revertirán los que caen dentro del rango temporal del track)")
+                else:
+                    print("  (track sin rango, se usaría conteo total — se pedirá confirmación extra)")
+            except Exception:
+                pass
+            print()
+            confirm = input(f"  Esto borrará el track \"{track_nombre}\" y sus {wp_cnt} waypoints. Confirmar? (s/N): ").strip().lower()
             if confirm != "s":
                 print("  Cancelado.")
                 conn.close()
@@ -1185,19 +1367,65 @@ def opcion_undo_ingest(db_path: str | None = None):
             if bak:
                 print(f"  ✓ Backup automático: {os.path.basename(bak)}")
             conn = sqlite3.connect(db_path)
-            # Revertir altitud de medios que obtuvieron altitud de este track
-            # (marcamos como NULL los que tengan geolocation_source='track_gps')
-            revertidos = conn.execute(
-                "UPDATE media SET altitude = NULL, geolocation_source = NULL "
-                "WHERE geolocation_source = 'track_gps'"
-            ).rowcount
-
-            # Borrar track (CASCADE borra waypoints automaticamente)
-            conn.execute("DELETE FROM tracks WHERE id = ?", (tid,))
-            conn.commit()
-            print(f"  Track \"{track_nombre}\" eliminado.")
-            if revertidos:
-                print(f"  Altitud revertida para {revertidos} medios (geolocation_source='track_gps').")
+            try:
+                conn.execute("BEGIN")
+                # Revertir altitud solo dentro del rango del track (evita wipe global multi-track)
+                if track_start and track_end:
+                    revertidos = conn.execute(
+                        "UPDATE media SET altitude = NULL, geolocation_source = NULL "
+                        "WHERE geolocation_source = 'track_gps' AND timestamp_utc BETWEEN ? AND ?",
+                        (track_start, track_end),
+                    ).rowcount
+                else:
+                    # Sin rango, no revertir automáticamente; preguntar
+                    if _preguntar_sn(f"Revertir altitud de TODOS los {cnt_gps_rango} medios con track_gps (sin rango)"):
+                        revertidos = conn.execute(
+                            "UPDATE media SET altitude = NULL, geolocation_source = NULL WHERE geolocation_source='track_gps'"
+                        ).rowcount
+                    else:
+                        revertidos = 0
+                        print("  Altitud preservada (sin rango).")
+                # Limpiar track_interpolado dentro del rango + keypoints/metadata asociados
+                interp_limpiados = 0
+                kp_borrados = 0
+                meta_limpiados = 0
+                if track_start and track_end:
+                    interp_limpiados = conn.execute(
+                        "UPDATE media SET latitude=NULL, longitude=NULL, altitude=NULL, geolocation_source=NULL "
+                        "WHERE geolocation_source='track_interpolado' AND timestamp_utc BETWEEN ? AND ?",
+                        (track_start, track_end),
+                    ).rowcount
+                    # keypoints ubicacion_video de medios en rango
+                    kp_borrados = conn.execute(
+                        "DELETE FROM media_keypoints WHERE key='ubicacion_video' AND media_id IN "
+                        "(SELECT id FROM media WHERE timestamp_utc BETWEEN ? AND ?)",
+                        (track_start, track_end),
+                    ).rowcount
+                    meta_limpiados = conn.execute(
+                        "DELETE FROM media_metadata WHERE key IN ('ubicacion_video_estado','ubicacion_video_gaps') AND media_id IN "
+                        "(SELECT id FROM media WHERE timestamp_utc BETWEEN ? AND ?)",
+                        (track_start, track_end),
+                    ).rowcount
+                    # También limpiar keypoints contexto track_interpolado si existen
+                    conn.execute(
+                        "DELETE FROM media_keypoints WHERE key LIKE 'contexto_%' AND source='track_interpolado' AND media_id IN "
+                        "(SELECT id FROM media WHERE timestamp_utc BETWEEN ? AND ?)",
+                        (track_start, track_end),
+                    )
+                # Borrar track (CASCADE borra waypoints automaticamente)
+                conn.execute("DELETE FROM tracks WHERE id = ?", (tid,))
+                conn.commit()
+                print(f"  Track \"{track_nombre}\" eliminado ({wp_cnt} waypoints).")
+                if revertidos:
+                    print(f"  Altitud revertida para {revertidos} medios (track_gps en rango).")
+                if interp_limpiados:
+                    print(f"  Limpiados {interp_limpiados} medios track_interpolado + {kp_borrados} keypoints + {meta_limpiados} metadata en rango.")
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                print(f"  Error al borrar track: {e}")
 
         else:
             print("  Codigo invalido. Use b<num> para medios o t<num> para tracks.")
@@ -1208,7 +1436,10 @@ def opcion_undo_ingest(db_path: str | None = None):
     except (sqlite3.OperationalError, ValueError) as e:
         print(f"  Error: {e}")
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
     pausa()
 
 
@@ -1827,11 +2058,8 @@ def opcion_consolidar_medios(db_path: str | None = None):
             print("  Cancelado.")
             pausa()
             return
-        upd = _preguntar_sn("Actualizar DB para apuntar a los nuevos archivos")
-        args = ["--db", db_path, "--new-root", new_root, "--mode", "copiar"]
-        if upd:
-            args.append("--update-db")
-        consolidar_medios.main(args)
+        # Dejar que el script pregunte interactivamente si la DB apunta a originales o nuevos (evita doble prompt)
+        consolidar_medios.main(["--db", db_path, "--new-root", new_root, "--mode", "copiar"])
     elif opc == "0":
         return
     pausa()

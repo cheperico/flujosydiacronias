@@ -89,10 +89,11 @@ def run_checks(conn: sqlite3.Connection, limit: int = 10) -> None:
     ):
         print(f"  #{r[0]:5d}  prov={r[1]:15s}  mun={r[2] or '-':15s}  loc={r[3] or '-':10s}  src={r[4]}")
 
-    print("\nMuestras (SIN provincia, con GPS):")
+    print(f"\nMuestras (SIN provincia, con GPS — límite {limit}):")
     for r in conn.execute(
         "SELECT id, latitude, longitude FROM media "
-        "WHERE latitude IS NOT NULL AND provincia IS NULL LIMIT 5"
+        "WHERE latitude IS NOT NULL AND provincia IS NULL LIMIT ?",
+        (limit,),
     ):
         print(f"  #{r[0]:5d}  GPS=({r[1]:.4f}, {r[2]:.4f})")
 

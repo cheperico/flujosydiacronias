@@ -33,7 +33,7 @@ import sqlite3
 import sys
 from datetime import datetime
 
-from db.util import abrir, resolver_db, normalizar_ruta as _norm_util, calcular_nueva_ruta as _calc_util, sidecar_abs as _sidecar_util
+from db.util import abrir, resolver_db, normalizar_ruta as _norm_util, calcular_nueva_ruta as _calc_util, sidecar_abs as _sidecar_util, _ruta_es_prefijo
 
 logging.basicConfig(
     level=logging.INFO,
@@ -113,7 +113,7 @@ def previsualizar_movimiento(
     sidecars = obtener_sidecars(conn)
     for mid, sc_rel in sidecars:
         sc_abs = os.path.normpath(os.path.join(old_norm, sc_rel))
-        if sc_abs.startswith(old_norm):
+        if _ruta_es_prefijo(sc_abs, old_norm):
             nueva_sc_abs = _calc_util(sc_abs, old_norm, new_norm)
             nueva_sc_rel = os.path.relpath(nueva_sc_abs, new_norm)
             cambios.append(
@@ -149,7 +149,7 @@ def ejecutar_movimiento(conn, old_root: str, new_root: str) -> dict:
 
     medios = obtener_medios(conn)
     for mid, abs_path, rel_path in medios:
-        if not abs_path.startswith(old_norm):
+        if not _ruta_es_prefijo(abs_path, old_norm):
             stats["skip"] += 1
             continue
 
@@ -229,20 +229,19 @@ def ejecutar_movimiento(conn, old_root: str, new_root: str) -> dict:
             (ruta_final_db, rel_final_db, carpeta_final, mid),
         )
 
-        # Actualizar sidecar_xml en DB (relativo al nuevo root)
-        if rel_path:
-            sc_rel_actual = conn.execute(
-                "SELECT sidecar_xml FROM media WHERE id = ?", (mid,)
-            ).fetchone()
-            if sc_rel_actual and sc_rel_actual[0]:
-                sc_abs_old = os.path.normpath(os.path.join(old_norm, sc_rel_actual[0]))
-                if sc_abs_old.startswith(old_norm) and os.path.isfile(sc_abs_old):
-                    sc_nueva_abs = _calc_util(sc_abs_old, old_norm, new_norm)
-                    sc_nueva_rel = os.path.relpath(sc_nueva_abs, new_norm)
-                    conn.execute(
-                        "UPDATE media SET sidecar_xml = ?, updated_at = datetime('now') WHERE id = ?",
-                        (sc_nueva_rel, mid),
-                    )
+        # Actualizar sidecar_xml en DB (relativo al nuevo root) — sin depender de que el archivo aún exista (ya fue movido)
+        sc_rel_actual = conn.execute(
+            "SELECT sidecar_xml FROM media WHERE id = ?", (mid,)
+        ).fetchone()
+        if sc_rel_actual and sc_rel_actual[0]:
+            sc_abs_old = os.path.normpath(os.path.join(old_norm, sc_rel_actual[0]))
+            if _ruta_es_prefijo(sc_abs_old, old_norm):
+                sc_nueva_abs = _calc_util(sc_abs_old, old_norm, new_norm)
+                sc_nueva_rel = os.path.relpath(sc_nueva_abs, new_norm)
+                conn.execute(
+                    "UPDATE media SET sidecar_xml = ?, updated_at = datetime('now') WHERE id = ?",
+                    (sc_nueva_rel, mid),
+                )
 
     conn.commit()
     return stats
@@ -267,7 +266,7 @@ def ejecutar_copia(
 
     medios = obtener_medios(conn)
     for mid, abs_path, rel_path in medios:
-        if not abs_path.startswith(old_norm):
+        if not _ruta_es_prefijo(abs_path, old_norm):
             stats["skip"] += 1
             continue
 
@@ -347,14 +346,11 @@ def ejecutar_copia(
                 (ruta_final_db, rel_final_db, carpeta_final, mid),
             )
 
-            # Actualizar sidecar_xml en DB
-            if rel_path:
-                sc_rel_actual = conn.execute(
-                    "SELECT sidecar_xml FROM media WHERE id = ?", (mid,)
-                ).fetchone()
-                if sc_rel_actual and sc_rel_actual[0]:
+            # Actualizar sidecar_xml en DB (independiente de existencia en disco, ya copiado si existía)
+            if sc_rel_actual := conn.execute("SELECT sidecar_xml FROM media WHERE id = ?", (mid,)).fetchone():
+                if sc_rel_actual[0]:
                     sc_abs_old = os.path.normpath(os.path.join(old_norm, sc_rel_actual[0]))
-                    if sc_abs_old.startswith(old_norm) and os.path.isfile(sc_abs_old):
+                    if _ruta_es_prefijo(sc_abs_old, old_norm):
                         sc_nueva_abs = _calc_util(sc_abs_old, old_norm, new_norm)
                         sc_nueva_rel = os.path.relpath(sc_nueva_abs, new_norm)
                         conn.execute(

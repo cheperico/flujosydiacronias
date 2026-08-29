@@ -61,23 +61,26 @@ logging.basicConfig(
 )
 log = logging.getLogger("consolidar_medios")
 
-# Patrones de raíz conocidos del proyecto (estructura real de los archivos)
-_PATRON_RAIZ = re.compile(r"\\(Testeo_\d+|ChatExport_[\d\-]+)")
+# Patrones de raíz conocidos — maneja \ y / (Windows/Posix)
+_PATRON_RAIZ = re.compile(r"[/\\](Testeo_\d+|ChatExport_[\d\-]+)(?=[/\\]|$)", re.IGNORECASE)
 
 
 def _detectar_raiz(abs_path: str) -> str:
-    """
+    r"""
     Devuelve la raíz "origen" de un path absoluto:
-      - Si contiene un patrón conocido (Testeo_N, ChatExport_fecha) incluye
-        ese nivel completo: C:\\...\\Testeo_2, C:\\...\\ChatExport_2026-07-28
-      - Si no, usa los primeros 5 componentes (drive + 4 niveles).
+      - Si contiene patrón conocido (Testeo_N, ChatExport_fecha) incluye ese nivel.
+      - Si no, usa 4 niveles (C:\ + 3 carpetas) para no fragmentar.
     """
-    m = _PATRON_RAIZ.search(abs_path)
+    norm = os.path.normpath(abs_path)
+    m = _PATRON_RAIZ.search(norm)
     if m:
-        return abs_path[: m.end()]
-    parts = abs_path.split(os.sep)
-    n = min(5, len(parts))
-    return os.path.join(*parts[:n])
+        return norm[: m.end()]
+    parts = re.split(r"[\\/]+", norm)
+    n = min(4, len(parts))
+    if parts and parts[0].endswith(":"):
+        # Windows drive: C: + Users\Federico\Desktop
+        return parts[0] + os.sep + os.sep.join(parts[1:n])
+    return os.sep.join(parts[:n]) if n > 1 else norm
 
 
 def detectar_raices(conn) -> dict:

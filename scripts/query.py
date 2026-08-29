@@ -71,11 +71,19 @@ def _es_tabla_valida(tabla: str) -> bool:
     return tabla in _TABLAS_PERMITIDAS
 
 
+def _quitar_strings(where: str) -> str:
+    """Quita contenido entre comillas simples/dobles para no confundir valores con SQL."""
+    # Remueve '...' y "..." (incluyendo escapes '')
+    s = re.sub(r"'[^']*'", "''", where)
+    s = re.sub(r'"[^"]*"', '""', s)
+    return s
+
 def _where_seguro(where: str) -> bool:
-    """Valida que la condición WHERE no contenga comandos destructivos ni inyección UNION/comments."""
-    if _PROHIBIDO_EN_WHERE.search(where):
+    """Valida WHERE ignorando valores entre comillas."""
+    limpio = _quitar_strings(where)
+    if _PROHIBIDO_EN_WHERE.search(limpio):
         return False
-    if _PATRON_PELIGROSO.search(where):
+    if _PATRON_PELIGROSO.search(limpio):
         return False
     return True
 
@@ -287,76 +295,85 @@ def _escape_like(text: str) -> str:
 
 
 def search_text(conn, text: str, limit: int = 30):
-    """Busca texto en columnas de media, media_metadata y media_keypoints (consolidado, con paginación global)."""
-    # Límite global clamp
+    """Busca texto repartiendo presupuesto entre media / metadata / keypoints para evitar starvation."""
     limit = max(1, min(int(limit), 200))
     esc = _escape_like(text)
     pattern = f"%{esc}%"
-
     results: list[sqlite3.Row] = []
 
-    # 1) Buscar en columnas TEXT de media con UNA query consolidada (OR)
+    # Reparto: 50% media, 30% metadata, 20% keypoints (mín 1 cada uno)
+    media_budget = max(1, int(limit * 0.5))
+    meta_budget = max(1, int(limit * 0.3))
+    kp_budget = max(1, limit - media_budget - meta_budget)
+    # Ajuste si limit pequeño
+    if limit < 3:
+        media_budget = min(limit, 1)
+        meta_budget = min(max(0, limit - media_budget), 1)
+        kp_budget = max(0, limit - media_budget - meta_budget)
+
     cursor = conn.execute("PRAGMA table_info(media)")
-    text_cols = [c["name"] for c in cursor.fetchall()
-                 if c["type"] in ("TEXT", "VARCHAR")]
+    text_cols = [c["name"] for c in cursor.fetchall() if c["type"] in ("TEXT", "VARCHAR")]
+    media_hits = 0
     if text_cols:
-        # Construir WHERE col LIKE ? ESCAPE '\' OR col2 LIKE ? ...
-        ors = " OR ".join(f"{col} LIKE ? ESCAPE '\\'" for col in text_cols)
-        # Necesitamos también exponer qué columna hizo match; usamos CASE
-        case_parts = " || ' | '.join? -> simplificamos: buscar con OR y luego identificar columna via UNION con etiqueta"
-        # Mejor: UNION ALL por columna pero con LIMIT global: hacemos UNION ALL y luego LIMIT
         union_parts = " UNION ALL ".join(
             f"SELECT id, '{col}' AS columna, substr({col},1,120) AS valor FROM media WHERE {col} LIKE ? ESCAPE '\\'"
             for col in text_cols
         )
-        # Parámetros: un pattern por col
         params = [pattern] * len(text_cols)
         try:
-            # Usamos subquery para LIMIT global
             q = f"SELECT * FROM ({union_parts}) LIMIT ?"
-            cur = conn.execute(q, (*params, limit))
-            results.extend(cur.fetchall())
+            cur = conn.execute(q, (*params, media_budget))
+            rows = cur.fetchall()
+            results.extend(rows)
+            media_hits = len(rows)
         except sqlite3.OperationalError:
-            # Fallback al método anterior por columna si UNION falla
             for col in text_cols:
                 try:
                     cur = conn.execute(
-                        f"SELECT id, '{col}' AS columna, substr({col},1,120) AS valor "
-                        f"FROM media WHERE {col} LIKE ? ESCAPE '\\' LIMIT ?",
-                        (pattern, limit)
+                        f"SELECT id, '{col}' AS columna, substr({col},1,120) AS valor FROM media WHERE {col} LIKE ? ESCAPE '\\' LIMIT ?",
+                        (pattern, media_budget),
                     )
-                    results.extend(cur.fetchall())
-                    if len(results) >= limit:
-                        results = results[:limit]
+                    rows = cur.fetchall()
+                    results.extend(rows)
+                    media_hits += len(rows)
+                    if media_hits >= media_budget:
                         break
                 except sqlite3.OperationalError:
                     pass
-
-    # 2) Buscar en media_metadata (si queda cupo)
-    remaining = limit - len(results)
-    if remaining > 0:
-        cursor = conn.execute("""
-            SELECT mm.media_id AS id, 'media_metadata:' || mm.key AS columna,
-                   substr(mm.value, 1, 120) AS valor
-            FROM media_metadata mm
-            WHERE mm.value LIKE ? ESCAPE '\\'
-            LIMIT ?
-        """, (pattern, remaining))
-        results.extend(cursor.fetchall())
-
-    # 3) Buscar en media_keypoints
-    remaining = limit - len(results)
-    if remaining > 0:
+    # metadata con su presupuesto
+    cur = conn.execute(
+        "SELECT mm.media_id AS id, 'media_metadata:' || mm.key AS columna, substr(mm.value,1,120) AS valor "
+        "FROM media_metadata mm WHERE mm.value LIKE ? ESCAPE '\\' LIMIT ?",
+        (pattern, meta_budget),
+    )
+    meta_rows = cur.fetchall()
+    results.extend(meta_rows)
+    # keypoints con su presupuesto
+    kp_rows = []
+    try:
+        cur = conn.execute(
+            "SELECT kp.media_id AS id, 'keypoints:' || kp.key AS columna, substr(kp.value,1,120) AS valor "
+            "FROM media_keypoints kp WHERE kp.value LIKE ? ESCAPE '\\' LIMIT ?",
+            (pattern, kp_budget),
+        )
+        kp_rows = cur.fetchall()
+        results.extend(kp_rows)
+    except sqlite3.OperationalError:
+        pass
+    # Si aún queda cupo global (porque alguna fuente dio menos), redistribuir sobrante a metadata
+    total_obtenido = len(results)
+    if total_obtenido < limit:
+        sobrante = limit - total_obtenido
+        # Intentar completar desde metadata
         try:
-            cursor = conn.execute("""
-                SELECT kp.media_id AS id, 'keypoints:' || kp.key AS columna,
-                       substr(kp.value, 1, 120) AS valor
-                FROM media_keypoints kp
-                WHERE kp.value LIKE ? ESCAPE '\\'
-                LIMIT ?
-            """, (pattern, remaining))
-            results.extend(cursor.fetchall())
-        except sqlite3.OperationalError:
+            cur = conn.execute(
+                "SELECT mm.media_id AS id, 'media_metadata:' || mm.key AS columna, substr(mm.value,1,120) AS valor "
+                "FROM media_metadata mm WHERE mm.value LIKE ? ESCAPE '\\' LIMIT ? OFFSET ?",
+                (pattern, sobrante, len(meta_rows)),
+            )
+            extra = cur.fetchall()
+            results.extend(extra)
+        except Exception:
             pass
 
     if not results:

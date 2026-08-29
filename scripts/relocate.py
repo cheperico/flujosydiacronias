@@ -26,7 +26,7 @@ import sys
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.util import abrir, resolver_db, normalizar_ruta, sidecar_abs, calcular_nueva_ruta
+from db.util import abrir, resolver_db, normalizar_ruta, sidecar_abs, calcular_nueva_ruta, _ruta_es_prefijo
 
 
 def get_ingest_root(conn) -> str | None:
@@ -59,7 +59,7 @@ def preview_changes(conn, old_root: str, new_root: str):
     cambios = 0
     for row in rows:
         mid, fname, abs_path, rel_path = row
-        if abs_path.startswith(old_norm):
+        if _ruta_es_prefijo(abs_path, old_norm):
             new_abs = calcular_nueva_ruta(abs_path, old_norm, new_norm)
             print(f"  #{mid} {fname}")
             print(f"    {abs_path}")
@@ -77,7 +77,7 @@ def preview_changes(conn, old_root: str, new_root: str):
     for row in rows2:
         mid, fname, sc_rel = row
         sc_abs = _sidecar_abs(sc_rel, old_norm)
-        if sc_abs.startswith(old_norm):
+        if _ruta_es_prefijo(sc_abs, old_norm):
             new_sc_abs = calcular_nueva_ruta(sc_abs, old_norm, new_norm)
             # Guardar como relativo al nuevo root (mismo criterio que ingest.py)
             new_sc_rel = os.path.relpath(new_sc_abs, new_norm)
@@ -91,27 +91,21 @@ def preview_changes(conn, old_root: str, new_root: str):
 
 
 def apply_changes(conn, old_root: str, new_root: str):
-    """Ejecuta los cambios en la DB."""
+    """Ejecuta los cambios en la DB (prefijo seguro con separador)."""
     old_norm = normalize_path(old_root)
     new_norm = normalize_path(new_root)
 
-    # Actualizar filepath_absoluto
-    cursor = conn.execute(
-        "SELECT COUNT(*) FROM media WHERE filepath_absoluto LIKE ? || '%'",
-        (old_norm,),
-    )
-    total = cursor.fetchone()[0]
-
-    conn.execute(
-        """
-        UPDATE media
-        SET filepath_absoluto = ? || substr(filepath_absoluto, length(?) + 1),
-            updated_at = datetime('now')
-        WHERE filepath_absoluto LIKE ? || '%'
-        """,
-        (new_norm, old_norm, old_norm),
-    )
-    cambios = conn.rowcount
+    # Actualizar filepath_absoluto con verificación Python segura (evita C:/Medios → C:/Medios2)
+    rows = conn.execute("SELECT id, filepath_absoluto FROM media").fetchall()
+    cambios = 0
+    for mid, abs_path in rows:
+        if _ruta_es_prefijo(abs_path, old_norm):
+            new_abs = calcular_nueva_ruta(abs_path, old_norm, new_norm)
+            conn.execute(
+                "UPDATE media SET filepath_absoluto = ?, updated_at = datetime('now') WHERE id = ?",
+                (new_abs, mid),
+            )
+            cambios += 1
 
     # Actualizar sidecar_xml (relativo a ingest_root)
     sidecar_rows = conn.execute(
@@ -120,7 +114,7 @@ def apply_changes(conn, old_root: str, new_root: str):
     cambios_sc = 0
     for mid, sc_rel in sidecar_rows:
         sc_abs = _sidecar_abs(sc_rel, old_norm)
-        if sc_abs.startswith(old_norm):
+        if _ruta_es_prefijo(sc_abs, old_norm):
             new_sc_abs = calcular_nueva_ruta(sc_abs, old_norm, new_norm)
             new_sc_rel = os.path.relpath(new_sc_abs, new_norm)
             conn.execute(
