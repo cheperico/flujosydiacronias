@@ -10,7 +10,7 @@ tiles_cache/
 assets_cache/
 tracks/
 .opencode/
-opencode.json
+comparar_pesos.py
 db/exports/
 db/backups/
 db/cache/

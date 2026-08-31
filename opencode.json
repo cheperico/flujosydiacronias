@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/muse-spark-1.2-contributor-free",
+  "small_model": "opencode/muse-spark-1.2-contributor-free",
+  "agent": {
+    "build": {
+      "model": "opencode/muse-spark-1.2-contributor-free"
+    },
+    "plan": {
+      "model": "opencode/muse-spark-1.2-contributor-free"
+    },
+    "general": {
+      "model": "opencode/muse-spark-1.2-contributor-free"
+    },
+    "explore": {
+      "model": "opencode/muse-spark-1.2-contributor-free"
+    },
+    "compaction": {
+      "model": "opencode/muse-spark-1.2-contributor-free"
+    },
+    "title": {
+      "model": "opencode/muse-spark-1.2-contributor-free"
+    },
+    "summary": {
+      "model": "opencode/muse-spark-1.2-contributor-free"
+    }
+  }
+}
