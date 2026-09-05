@@ -1541,7 +1541,7 @@ def _verificar_ollama(modelos: list[str] | None = None) -> bool:
     return True
 
 
-_PASOS_IA = {"keywords", "descriptions"}
+_PASOS_IA = {"keywords", "descriptions", "combinado", "kw_transcripcion", "kw_texto", "analizar_video"}
 
 
 def _ejecutar_improve_db(pasos: str | None = None, modo: str = "skip"):
@@ -1751,58 +1751,99 @@ def _elegir_modo_pregunta(db_path: str | None, descripcion: str,
 
 
 def opcion_improve_db(db_path: str | None = None):
-    """Menu para ejecutar pasos de mejora sobre la DB (hojas paginadas).
-    Regla de navegacion: hasta 9 opciones por hoja (1-9); cuando se superan,
-    se crea una hoja nueva. n = Siguiente >>, p = << Anterior, 0 = Volver.
-    En hojas con Anterior y Siguiente, p se lista primero, luego n.
-    Distribucion: Hoja 1 (IA y color, 9 opc: audio 7-9 con Audio tagging
-    primero, seguido de Transcripcion y Keypoints), Hoja 2 (etiquetado +
-    inferencia y ubicacion, 9 opc: Keywords desde textos y transcripciones 1 y Refinar
-    keywords 2 = fin de la seccion de etiquetado, antes de timestamps/GPS),
-    Hoja 3 (Analisis de video, 2 opc: Analizar video con escenas + IA y
-    Keypoints de contexto).
-    El menu tiene 3 hojas (embeddings retirado del TUI: rediseno pendiente)."""
+    """Menu para ejecutar pasos de mejora sobre la DB — agrupado por tipo de medio.
+
+    1) Todos y 2) Manual cubren la union completa de DEP_ORDER (~22 pasos) y sirven
+    para dejar la maquina toda la noche en skip (saltea sin red/componente y avisa).
+    3..7 agrupan por tipo de medio con repeticion permitida (ej transcribe en Audios y Videos).
+    7) Enriquecimiento / Curaduria = refinar, limpiar, timestamps/gps, geocode, gradiente,
+    clima, dia semana, astronomia."""
     db_path = leer_db(db_path)
 
     def _opcion_pasos_manuales(db):
-        pasos = input("  Pasos (separados por coma, ej: colors,keywords): ").strip()
-        if pasos:
-            modo = _preguntar_modo(db)
-            if modo is None:
-                print("  Cancelado.")
-                pausa()
-                return
-            _ejecutar_improve_db(pasos=pasos, modo=modo)
+        from scripts import improve_db
+        print("\n  Pasos disponibles (improve_db --list):")
+        for n in improve_db.DEP_ORDER:
+            print(f"    {n}")
+        print()
+        pasos = input("  Pasos (separados por coma, ej: colors,keywords) o Enter=todos: ").strip()
+        if not pasos:
+            pasos = ",".join(improve_db.DEP_ORDER)
+        modo = _preguntar_modo(db)
+        if modo is None:
+            print("  Cancelado.")
+            pausa()
+            return
+        # Validar antes de ejecutar
+        invalidos = [p.strip() for p in pasos.split(",") if p.strip() not in improve_db.REGISTRY]
+        if invalidos:
+            print(f"  Pasos invalidos: {', '.join(invalidos)}")
+            print("  Usa los nombres de la lista anterior.")
+            pausa()
+            return
+        _ejecutar_improve_db(pasos=pasos, modo=modo)
         pausa()
 
-    _menu_paginado("MEJORAR BASE DE DATOS", [
-        ("  -- Pasos de IA y color --\n", {
-            "1": ("Todos los pasos (skip)", lambda db: _ejecutar_paso_mejora(None, db)),
-            "2": ("Elegir pasos manualmente", _opcion_pasos_manuales),
-            "3": ("Colores dominantes", lambda db: _ejecutar_paso_mejora("colors", db)),
-            "4": ("Keywords con IA", lambda db: _ejecutar_paso_mejora("keywords", db)),
-            "5": ("Descripcion con IA", lambda db: _ejecutar_paso_mejora("descriptions", db)),
-            "6": ("Keywords + Descripcion (pasada unica, mas lenta)", lambda db: _ejecutar_paso_mejora("keywords,descriptions", db)),
-            "7": ("Audio tagging (sonidos ambientales)", opcion_audio_tagging),
-            "8": ("Transcripcion (audios/videos)", lambda db: _ejecutar_paso_mejora("transcribe", db)),
-            "9": ("Keypoints de transcripciones", lambda db: _ejecutar_paso_mejora("keypoints", db)),
-        }),
-        ("  -- Etiquetado + inferencia y ubicacion --\n", {
-            "1": ("Keywords desde textos y transcripciones", opcion_keywords_transcripciones),
-            "2": ("Refinar keywords (normalizar + sinonimos)", opcion_refinar_keywords),
-            "3": ("Inferir timestamps", lambda db: _ejecutar_paso_mejora("timestamps", db)),
-            "4": ("Inferir GPS", lambda db: _ejecutar_paso_mejora("gps", db)),
-            "5": ("Calcular gradientes de ruta", lambda db: opcion_gradient()),
-            "6": ("Localizacion (provincia, municipio, localidad)", lambda db: opcion_geocode()),
-            "7": ("Condiciones climaticas", lambda db: opcion_weather()),
-            "8": ("Dia de la semana", lambda db: opcion_dia_semana()),
-            "9": ("Posicion del sol (astronomia)", lambda db: opcion_astronomia()),
-        }),
-        ("  -- Analisis de video --\n", {
-            "1": ("Analizar video (escenas + IA)", opcion_analizar_video),
-            "2": ("Keypoints de contexto (devenir geografico)", opcion_keypoints_contexto),
-        }),
-    ], db_path)
+    def _todos(db):
+        # Todos = todos los pasos en DEP_ORDER, con reporte de salteados
+        _ejecutar_paso_mejora(None, db)
+
+    # --- Submenús por tipo de medio ---
+    def _menu_imagenes(db):
+        _menu("IMAGENES", {
+            "1": ("Colores dominantes", lambda d: _ejecutar_paso_mejora("colors", d)),
+            "2": ("Keywords con IA", lambda d: _ejecutar_paso_mejora("keywords", d)),
+            "3": ("Descripcion con IA", lambda d: _ejecutar_paso_mejora("descriptions", d)),
+            "4": ("Keywords+Descripcion (1 vision+1 traduccion)", lambda d: _ejecutar_paso_mejora("combinado", d)),
+            "5": ("Metadatos de video (ExifTool 360)", lambda d: _ejecutar_paso_mejora("video_metadata", d)),
+        }, db_path, intro="  Pasos que operan sobre imagenes (vision minicpm + color):")
+
+    def _menu_audios(db):
+        _menu("AUDIOS", {
+            "1": ("Transcripcion (faster-whisper)", lambda d: _ejecutar_paso_mejora("transcribe", d)),
+            "2": ("Keypoints de transcripciones", lambda d: _ejecutar_paso_mejora("keypoints", d)),
+            "3": ("Audio tagging (sonidos ambientales)", lambda d: _ejecutar_paso_mejora("audio_tagging", d)),
+            "4": ("Keywords del sentido (transcripciones)", lambda d: _ejecutar_paso_mejora("kw_transcripcion", d)),
+        }, db_path, intro="  Pasos sobre audios (tambien aplican a videos con audio):")
+
+    def _menu_videos(db):
+        _menu("VIDEOS", {
+            "1": ("Transcripcion (faster-whisper)", lambda d: _ejecutar_paso_mejora("transcribe", d)),
+            "2": ("Audio tagging (sonidos ambientales)", lambda d: _ejecutar_paso_mejora("audio_tagging", d)),
+            "3": ("Analizar video por escenas (ffmpeg+minicpm)", lambda d: _ejecutar_paso_mejora("analizar_video", d)),
+            "4": ("Keypoints por escena (desde video_analysis)", lambda d: _ejecutar_paso_mejora("keypoints_video", d)),
+            "5": ("Keypoints de contexto (track GPX)", lambda d: _ejecutar_paso_mejora("keypoints_contexto", d)),
+            "6": ("Metadatos de video (ExifTool 360)", lambda d: _ejecutar_paso_mejora("video_metadata", d)),
+        }, db_path, intro="  Pasos sobre videos (duplicacion permitida con Audios):")
+
+    def _menu_textos(db):
+        _menu("TEXTOS", {
+            "1": ("Keywords del sentido (textos .md)", lambda d: _ejecutar_paso_mejora("kw_texto", d)),
+            "2": ("Refinar keywords (texto)", lambda d: _ejecutar_paso_mejora("refinar", d)),
+        }, db_path, intro="  Pasos sobre textos ingresados (.md):")
+
+    def _menu_enriquecimiento(db):
+        _menu("ENRIQUECIMIENTO / CURADURIA", {
+            "1": ("Refinar keywords (imagenes)", lambda d: _ejecutar_paso_mejora("refinar", d)),
+            "2": ("Limpiar descripciones (eco del prompt)", lambda d: _ejecutar_paso_mejora("limpiar_descripciones", d)),
+            "3": ("Inferir timestamps", lambda d: _ejecutar_paso_mejora("timestamps", d)),
+            "4": ("Inferir GPS", lambda d: _ejecutar_paso_mejora("gps", d)),
+            "5": ("Geocodificacion (Georef → prov/municipio)", lambda d: _ejecutar_paso_mejora("geocode", d)),
+            "6": ("Gradientes de ruta", lambda d: _ejecutar_paso_mejora("gradiente", d)),
+            "7": ("Clima historico (Open-Meteo)", lambda d: _ejecutar_paso_mejora("weather", d)),
+            "8": ("Dia de la semana", lambda d: _ejecutar_paso_mejora("dia_semana", d)),
+            "9": ("Posicion del sol / twilight (NOAA)", lambda d: _ejecutar_paso_mejora("astronomia", d)),
+        }, db_path, intro="  Curaduria y enriquecimiento transversal (requiere GPS/tiempo; geocode/clima saltean sin red y avisan):")
+
+    _menu("MEJORAR BASE DE DATOS", {
+        "1": ("Todos los pasos (overnight, skip)", _todos),
+        "2": ("Elegir pasos manualmente", _opcion_pasos_manuales),
+        "3": ("Imagenes", _menu_imagenes),
+        "4": ("Audios", _menu_audios),
+        "5": ("Videos", _menu_videos),
+        "6": ("Textos", _menu_textos),
+        "7": ("Enriquecimiento / Curaduria", _menu_enriquecimiento),
+    }, db_path, intro="  1 y 2 cubren TODOS los pasos (DEP_ORDER ampliado). 3..7 por tipo de medio\n  con repeticion permitida; 7 = Enriquecimiento / Curaduria.")
 
 
 def opcion_weather():
@@ -2450,20 +2491,21 @@ def opcion_ayuda():
     def _ayuda_improve_db(_db):
         limpiar_pantalla()
         print("============ IMPROVE-DB ============\n")
-        print("  Ejecuta pasos de mejora sobre la base de datos (9 pasos).")
+        print("  Ejecuta pasos de mejora sobre la base de datos (~22 pasos).")
+        print("  1) Todos y 2) Manual cubren TODOS los pasos (overnight en skip).")
+        print("  3..7 agrupan por tipo de medio con repeticion permitida.")
         print("  Uso: python flujos.py improve-db [--steps X,Y] [--mode skip|update|replace] [--db RUTA] [--no-mostrar] [--workers N]\n")
-        print("  Pasos disponibles:")
-        print("    colors        Extraer colores dominantes")
-        print("    keywords      Etiquetar con IA")
-        print("    descriptions  Describir con IA")
-        print("    combinado     Keywords + descripcion en 1 llamada")
-        print("    transcribe    Transcribir audios/videos")
-        print("    keypoints     Poblar keypoints desde transcripciones")
-        print("    timestamps    Inferir timestamps faltantes")
-        print("    gps           Inferir GPS")
-        print("    video_metadata Metadatos de video (camara, 360, author)")
+        print("  Pasos (improve_db --list para detalle):")
+        print("    colors, keywords, descriptions, combinado, transcribe, keypoints,")
+        print("    timestamps, gps, video_metadata, audio_tagging, kw_transcripcion,")
+        print("    kw_texto, refinar, geocode, gradiente, weather, dia_semana,")
+        print("    astronomia, analizar_video, keypoints_video, keypoints_contexto,")
+        print("    limpiar_descripciones")
         print()
-        print("  Flags: --list / --all  para listar pasos; --workers N (default 1).")
+        print("  7) Enriquecimiento / Curaduria = refinar, limpiar, timestamps, gps,")
+        print("     geocode, gradiente, clima, dia semana, astronomia.")
+        print("  Todos saltea sin red/componente y avisa que quedo pendiente.")
+        print("  Flags: --list para listar pasos; --workers N (default 1).")
         pausa()
 
     def _ayuda_geocode(_db):

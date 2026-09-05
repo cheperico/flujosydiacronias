@@ -67,7 +67,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("improve_db")
 
-# ── Claves en media_metadata (pipeline IA EN → ES) ───────────────────────────
+# ── Claves en media_metadata (pipeline IA EN -> ES) ───────────────────────────
 # La IA de visión genera en inglés (mejor calidad con minicpm) y se guarda en
 # claves *_en; luego se traduce a español con un modelo de texto y se guarda
 # en las claves definitivas (ia_keywords / ia_description) que consume el resto
@@ -286,7 +286,7 @@ def _procesar_vision(conn, mode, stats, nombre, fn_vision, clave_en, clave_es,
         mostrar_label: etiqueta para --mostrar.
         es_lista: True si fn_vision devuelve lista (keywords), False si str.
     """
-    log.info("  [Fase A] Visión (EN) → %s", clave_en)
+    log.info("  [Fase A] Visión (EN) -> %s", clave_en)
 
     from scripts.ai_media.image_analysis import MODELO_VISION_DEFAULT
 
@@ -378,7 +378,7 @@ def _procesar_vision(conn, mode, stats, nombre, fn_vision, clave_en, clave_es,
                 done, pendientes = wait(pendientes, timeout=timeout_future,
                                         return_when=FIRST_COMPLETED)
                 if not done:
-                    # Ningún futuro avanzó en `timeout_future` s → colgado real.
+                    # Ningún futuro avanzó en `timeout_future` s -> colgado real.
                     log.warning(
                         "  Sin progreso durante %d s: cancelo el resto y "
                         "guardo lo procesado.", timeout_future)
@@ -434,7 +434,7 @@ def _procesar_vision(conn, mode, stats, nombre, fn_vision, clave_en, clave_es,
 def _traducir_metadata(conn, mode, stats, nombre, clave_en, clave_es, paso,
                        modelo_traduccion="translategemma", motor="google"):
     """
-    Fase B de keywords/descriptions: traduce EN → ES sobre la DB.
+    Fase B de keywords/descriptions: traduce EN -> ES sobre la DB.
 
     Lee registros con clave_en y traduce con el pipeline NO-AI (glosario +
     motor clásico, google por defecto) o, si motor == "ollama", con el
@@ -452,7 +452,7 @@ def _traducir_metadata(conn, mode, stats, nombre, clave_en, clave_es, paso,
         motor: motor de traducción: "google" (default) | "argos" |
                "glosario" (solo léxico) | "ollama" (legacy con IA).
     """
-    log.info("  [Fase B] Traducción (%s → %s) [motor=%s]", clave_en, clave_es, motor)
+    log.info("  [Fase B] Traducción (%s -> %s) [motor=%s]", clave_en, clave_es, motor)
 
     if mode == "skip":
         query = f"""
@@ -490,7 +490,7 @@ def _traducir_metadata(conn, mode, stats, nombre, clave_en, clave_es, paso,
 
 def _traducir_metadata_ollama(conn, rows, nombre, clave_es, paso,
                               modelo_traduccion, stats):
-    """Traduce EN → ES con el pipeline legacy de Ollama (translategemma)."""
+    """Traduce EN -> ES con el pipeline legacy de Ollama (translategemma)."""
     from scripts.ai_media.traducir_metadata import traducir_llamada, leer_valor_db
 
     cliente = _crear_cliente_texto()
@@ -566,7 +566,7 @@ def _traducir_metadata_ollama(conn, rows, nombre, clave_es, paso,
 
 def _traducir_metadata_glosario(conn, rows, nombre, clave_es, paso,
                                 motor, stats):
-    """Traduce EN → ES con glosario + motor clásico (sin Ollama)."""
+    """Traduce EN -> ES con glosario + motor clásico (sin Ollama)."""
     from scripts.ai_media.glosario import Glosario, crear_motor
     from scripts.ai_media.traducir_metadata import leer_valor_db
 
@@ -654,11 +654,11 @@ def mostrar_label_nombre(paso):
 
 def run_keywords(conn, db_path, mode, stats, motor="google"):
     """Etiqueta imágenes con IA: visión (EN) + traducción (ES, motor clásico)."""
-    log.info("Paso: keywords — Etiquetando imágenes con IA (EN → ES)")
+    log.info("Paso: keywords — Etiquetando imágenes con IA (EN -> ES)")
 
     from scripts.ai_media.image_analysis import extraer_keywords
 
-    # Fase A: visión EN → ia_keywords_en
+    # Fase A: visión EN -> ia_keywords_en
     _procesar_vision(
         conn, mode, stats,
         nombre="keywords",
@@ -668,7 +668,7 @@ def run_keywords(conn, db_path, mode, stats, motor="google"):
         mostrar_label="Keywords",
         es_lista=True,
     )
-    # Fase B: traducción → ia_keywords (ES)
+    # Fase B: traducción -> ia_keywords (ES)
     _traducir_metadata(
         conn, mode, stats,
         nombre="keywords",
@@ -681,11 +681,11 @@ def run_keywords(conn, db_path, mode, stats, motor="google"):
 
 def run_descriptions(conn, db_path, mode, stats, motor="google"):
     """Describe imágenes con IA: visión (EN) + traducción (ES, motor clásico)."""
-    log.info("Paso: descriptions — Describiendo imágenes con IA (EN → ES)")
+    log.info("Paso: descriptions — Describiendo imágenes con IA (EN -> ES)")
 
     from scripts.ai_media.image_analysis import describir_imagen
 
-    # Fase A: visión EN → ia_description_en
+    # Fase A: visión EN -> ia_description_en
     _procesar_vision(
         conn, mode, stats,
         nombre="descriptions",
@@ -695,7 +695,7 @@ def run_descriptions(conn, db_path, mode, stats, motor="google"):
         mostrar_label="Descripciones",
         es_lista=False,
     )
-    # Fase B: traducción → ia_description (ES)
+    # Fase B: traducción -> ia_description (ES)
     _traducir_metadata(
         conn, mode, stats,
         nombre="descriptions",
@@ -799,7 +799,7 @@ def run_combinado(conn, db_path, mode, stats, motor="google"):
                 done, pendientes = wait(pendientes, timeout=timeout_future,
                                         return_when=FIRST_COMPLETED)
                 if not done:
-                    # Ningún futuro avanzó en `timeout_future` s → colgado real.
+                    # Ningún futuro avanzó en `timeout_future` s -> colgado real.
                     log.warning(
                         "  Sin progreso durante %d s: cancelo el resto y "
                         "guardo lo procesado.", timeout_future)
@@ -1387,6 +1387,313 @@ def run_video_metadata(conn, db_path, mode, stats):
 
 
 # ==============================================================================
+# Pasos adicionales (Enriquecimiento / Curaduría) — wrappers sobre scripts sueltos
+# Cada check cuenta pendientes; cada run delega en el script correspondiente
+# via subprocess, respetando --mode y salteando sin red/componente con aviso.
+# ==============================================================================
+
+def check_audio_tagging(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE type IN ('video','audio')").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE m.type IN ('video','audio')
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='ia_keywords_sonido')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_audio_tagging(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: audio_tagging — Sonidos ambientales (sherpa-onnx CED-mini)")
+    # Delega en scripts/ai_media/audio_tagging.py; respeta mode, saltea si falta sherpa_onnx/ffmpeg
+    argv = [sys.executable, os.path.join(os.path.dirname(__file__), "ai_media", "audio_tagging.py"), "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, capture_output=False, timeout=3600)
+        if res.returncode != 0:
+            log.warning("  audio_tagging salteado/error (returncode %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except FileNotFoundError as e:
+        log.warning("  audio_tagging salteado (componente faltante): %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  audio_tagging salteado (error): %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_kw_transcripcion(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media m WHERE EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='whisper_segments')").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='whisper_segments')
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm2 WHERE mm2.media_id=m.id AND mm2.key='ia_keywords_transcripcion')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_kw_transcripcion(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: kw_transcripcion — Keywords del sentido de transcripciones (gemma3)")
+    argv = [sys.executable, os.path.join(os.path.dirname(__file__), "ai_media", "keywords_transcripciones.py"), "--origen", "transcripcion", "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=3600)
+        if res.returncode != 0:
+            log.warning("  kw_transcripcion salteado/error (rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  kw_transcripcion salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_kw_texto(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE type='text'").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE m.type='text'
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='ia_keywords_texto')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_kw_texto(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: kw_texto — Keywords del sentido de textos .md (gemma3)")
+    argv = [sys.executable, os.path.join(os.path.dirname(__file__), "ai_media", "keywords_transcripciones.py"), "--origen", "texto", "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=3600)
+        if res.returncode != 0:
+            log.warning("  kw_texto salteado/error (rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  kw_texto salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_refinar(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media m WHERE EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='ia_keywords')").fetchone()[0]
+    # Refinar es idempotente; si ya existe, pendiente 0 (se puede forzar con update/replace)
+    return {"total": total, "pendientes": 0, "hecho": total}
+
+def run_refinar(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: refinar — Unificar keywords (léxico + diccionario)")
+    argv = [sys.executable, os.path.join(os.path.dirname(__file__), "ai_media", "refinar_keywords.py"), "--mode", mode if mode in ("update","replace") else "update", "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=600)
+        if res.returncode != 0:
+            log.warning("  refinar salteado/error (rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  refinar salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_geocode(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL").fetchone()[0]
+    pendientes = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL AND provincia IS NULL").fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_geocode(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: geocode — Geocodificación inversa (Georef API)")
+    argv = [sys.executable, os.path.join(os.path.dirname(__file__), "..", "scripts", "geocode.py"), "--mode", mode, "--db", db_path]
+    # geocode.py está en scripts/geocode.py; desde scripts/improve_db.py el path es ../scripts/geocode.py o ./geocode.py
+    # Normalizar: usar path relativo al proyecto
+    cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "geocode.py")
+    if not os.path.isfile(cand):
+        cand = os.path.join(os.path.dirname(__file__), "geocode.py")
+    argv = [sys.executable, cand, "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=600)
+        if res.returncode != 0:
+            log.warning("  geocode salteado/error (sin red? rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  geocode salteado (sin red): %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_gradiente(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL AND longitude IS NOT NULL").fetchone()[0]
+    try:
+        pendientes = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL AND distance_from_prev_m IS NULL AND timestamp_utc IS NOT NULL").fetchone()[0]
+    except sqlite3.OperationalError:
+        pendientes = total
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_gradiente(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: gradiente — Distancia/elevación/pendiente (Haversine)")
+    cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "gradiente.py")
+    if not os.path.isfile(cand):
+        cand = os.path.join(os.path.dirname(__file__), "gradiente.py")
+    argv = [sys.executable, cand, "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=600)
+        if res.returncode != 0:
+            log.warning("  gradiente error (rc %s)", res.returncode)
+            stats["errors"] = stats.get("errors", 0) + 1
+    except Exception as e:
+        log.warning("  gradiente salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_weather(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL AND timestamp_utc IS NOT NULL").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE m.latitude IS NOT NULL AND m.timestamp_utc IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='weather_source')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_weather(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: weather — Clima histórico (Open-Meteo)")
+    cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "fetch_weather.py")
+    if not os.path.isfile(cand):
+        cand = os.path.join(os.path.dirname(__file__), "fetch_weather.py")
+    argv = [sys.executable, cand, "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=900)
+        if res.returncode != 0:
+            log.warning("  weather salteado/error (sin red? rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  weather salteado (sin red): %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_dia_semana(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE timestamp_utc IS NOT NULL").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE m.timestamp_utc IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='dia_semana')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_dia_semana(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: dia_semana — Día de la semana")
+    cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "dia_semana.py")
+    if not os.path.isfile(cand):
+        cand = os.path.join(os.path.dirname(__file__), "dia_semana.py")
+    argv = [sys.executable, cand, "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=600)
+        if res.returncode != 0:
+            log.warning("  dia_semana error (rc %s)", res.returncode)
+            stats["errors"] = stats.get("errors", 0) + 1
+    except Exception as e:
+        log.warning("  dia_semana salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_astronomia(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL AND timestamp_utc IS NOT NULL").fetchone()[0]
+    try:
+        pendientes = conn.execute("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL AND timestamp_utc IS NOT NULL AND sun_elevation IS NULL").fetchone()[0]
+    except sqlite3.OperationalError:
+        pendientes = total
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_astronomia(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: astronomia — Posición del sol / twilight (NOAA)")
+    cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "astronomia.py")
+    if not os.path.isfile(cand):
+        cand = os.path.join(os.path.dirname(__file__), "astronomia.py")
+    argv = [sys.executable, cand, "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=600)
+        if res.returncode != 0:
+            log.warning("  astronomia error (rc %s)", res.returncode)
+            stats["errors"] = stats.get("errors", 0) + 1
+    except Exception as e:
+        log.warning("  astronomia salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_analizar_video(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE type='video'").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE m.type='video'
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='video_analysis')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_analizar_video(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: analizar_video — Scene detection + visión por escena")
+    cand = os.path.join(os.path.dirname(__file__), "ai_media", "analyze_video.py")
+    # analizar_video no tiene --mode; usa --db y procesa pendientes. Para update/replace, delegamos sin filtro (todo)
+    argv = [sys.executable, cand, "--db", db_path]
+    if mode in ("update","replace"):
+        # No hay mode, pero forzamos limit ninguno; el script procesa todos los sin análisis en skip, así que para update necesitamos limpiar antes
+        if mode == "replace":
+            conn.execute("DELETE FROM media_metadata WHERE key='video_analysis'")
+            conn.commit()
+    try:
+        res = subprocess.run(argv, timeout=3600)
+        if res.returncode != 0:
+            log.warning("  analizar_video salteado/error (ollama/ffmpeg? rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  analizar_video salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_keypoints_video(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media m WHERE EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='video_analysis')").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='video_analysis')
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm2 WHERE mm2.media_id=m.id AND mm2.key='keypoints_video_estado')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_keypoints_video(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: keypoints_video — Keypoints por escena (desde video_analysis)")
+    cand = os.path.join(os.path.dirname(__file__), "ai_media", "keypoints_video.py")
+    argv = [sys.executable, cand, "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=600)
+        if res.returncode != 0:
+            log.warning("  keypoints_video salteado/error (rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  keypoints_video salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_keypoints_contexto(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media WHERE type IN ('video','audio') AND timestamp_utc IS NOT NULL").fetchone()[0]
+    pendientes = conn.execute("""
+        SELECT COUNT(*) FROM media m WHERE m.type IN ('video','audio') AND m.timestamp_utc IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='keypoints_contexto_estado')
+    """).fetchone()[0]
+    return {"total": total, "pendientes": pendientes, "hecho": total - pendientes}
+
+def run_keypoints_contexto(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: keypoints_contexto — Devenir geográfico (F1-F4)")
+    cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "keypoints_contexto.py")
+    if not os.path.isfile(cand):
+        cand = os.path.join(os.path.dirname(__file__), "..", "keypoints_contexto.py")
+        cand = os.path.normpath(cand)
+    argv = [sys.executable, cand, "--mode", mode, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=900)
+        if res.returncode != 0:
+            log.warning("  keypoints_contexto salteado/error (sin track/GPX? rc %s)", res.returncode)
+            stats["salteados"] = stats.get("salteados", 0) + 1
+    except Exception as e:
+        log.warning("  keypoints_contexto salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+def check_limpiar_descripciones(conn) -> dict:
+    total = conn.execute("SELECT COUNT(*) FROM media_metadata WHERE key IN ('ia_description','ia_description_en')").fetchone()[0]
+    return {"total": total, "pendientes": 0, "hecho": total}
+
+def run_limpiar_descripciones(conn, db_path, mode, stats):
+    import subprocess
+    log.info("Paso: limpiar_descripciones — Recorta meta-intros de descripciones")
+    cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "limpiar_descripciones.py")
+    if not os.path.isfile(cand):
+        cand = os.path.join(os.path.dirname(__file__), "limpiar_descripciones.py")
+    # limpiar_descripciones no usa --mode; siempre limpia pendientes. Para replace, no hay flag.
+    argv = [sys.executable, cand, "--db", db_path]
+    try:
+        res = subprocess.run(argv, timeout=600)
+        if res.returncode != 0:
+            log.warning("  limpiar_descripciones error (rc %s)", res.returncode)
+            stats["errors"] = stats.get("errors", 0) + 1
+    except Exception as e:
+        log.warning("  limpiar_descripciones salteado: %s", e)
+        stats["salteados"] = stats.get("salteados", 0) + 1
+
+# ==============================================================================
 # Registro de pasos
 # ==============================================================================
 
@@ -1445,12 +1752,93 @@ REGISTRY = {
         "check": check_video_metadata,
         "run": run_video_metadata,
     },
+    "audio_tagging": {
+        "description": "Sonidos ambientales (sherpa-onnx CED-mini -> ia_keywords_sonido)",
+        "dependencies": [],
+        "check": check_audio_tagging,
+        "run": run_audio_tagging,
+    },
+    "kw_transcripcion": {
+        "description": "Keywords del sentido de transcripciones (gemma3 -> ia_keywords_transcripcion)",
+        "dependencies": ["transcribe"],
+        "check": check_kw_transcripcion,
+        "run": run_kw_transcripcion,
+    },
+    "kw_texto": {
+        "description": "Keywords del sentido de textos .md (gemma3 -> ia_keywords_texto)",
+        "dependencies": [],
+        "check": check_kw_texto,
+        "run": run_kw_texto,
+    },
+    "refinar": {
+        "description": "Refinar/unificar keywords (léxico + diccionario)",
+        "dependencies": ["keywords"],
+        "check": check_refinar,
+        "run": run_refinar,
+    },
+    "geocode": {
+        "description": "Geocodificación inversa (Georef API -> provincia/municipio)",
+        "dependencies": ["gps"],
+        "check": check_geocode,
+        "run": run_geocode,
+    },
+    "gradiente": {
+        "description": "Gradientes de ruta (Haversine, pendiente)",
+        "dependencies": ["gps"],
+        "check": check_gradiente,
+        "run": run_gradiente,
+    },
+    "weather": {
+        "description": "Clima histórico (Open-Meteo -> weather_*)",
+        "dependencies": ["gps"],
+        "check": check_weather,
+        "run": run_weather,
+    },
+    "dia_semana": {
+        "description": "Día de la semana (timestamp_utc -> dia_semana)",
+        "dependencies": ["timestamps"],
+        "check": check_dia_semana,
+        "run": run_dia_semana,
+    },
+    "astronomia": {
+        "description": "Posición del sol / twilight (NOAA)",
+        "dependencies": ["gps"],
+        "check": check_astronomia,
+        "run": run_astronomia,
+    },
+    "analizar_video": {
+        "description": "Analizar video por escenas (ffmpeg + minicpm -> video_analysis)",
+        "dependencies": [],
+        "check": check_analizar_video,
+        "run": run_analizar_video,
+    },
+    "keypoints_video": {
+        "description": "Keypoints por escena de video (desde video_analysis)",
+        "dependencies": ["analizar_video"],
+        "check": check_keypoints_video,
+        "run": run_keypoints_video,
+    },
+    "keypoints_contexto": {
+        "description": "Keypoints de contexto geográfico (track GPX -> contexto_*)",
+        "dependencies": ["gps"],
+        "check": check_keypoints_contexto,
+        "run": run_keypoints_contexto,
+    },
+    "limpiar_descripciones": {
+        "description": "Limpiar meta-intros de descripciones (determinista)",
+        "dependencies": ["descriptions"],
+        "check": check_limpiar_descripciones,
+        "run": run_limpiar_descripciones,
+    },
 }
 
 DEP_ORDER = ["colors", "keywords", "descriptions", "combinado", "transcribe", "keypoints",
-             "timestamps", "gps", "video_metadata"]
+             "timestamps", "gps", "video_metadata",
+             "audio_tagging", "kw_transcripcion", "kw_texto", "refinar",
+             "geocode", "gradiente", "weather", "dia_semana", "astronomia",
+             "analizar_video", "keypoints_video", "keypoints_contexto", "limpiar_descripciones"]
 
-PASOS_IA = {"keywords", "descriptions", "combinado"}
+PASOS_IA = {"keywords", "descriptions", "combinado", "kw_transcripcion", "kw_texto", "analizar_video"}
 """Pasos que requieren Ollama (vision) y usan --workers para concurrencia.
 Los pasos locales (colors, keypoints, timestamps, gps, video_metadata) y
 transcribe (faster-whisper local) NO usan Ollama ni workers.
@@ -1615,7 +2003,7 @@ Ejemplos:
     # (sys.exit(130)), sin traceback. Los pasos ya commitean por checkpoint.
     from scripts.ai_media.checkpoint import manejar_interrupcion
 
-    stats = {"warnings": 0, "errors": 0}
+    stats = {"warnings": 0, "errors": 0, "salteados": 0}
     with manejar_interrupcion(conn=conn, etiqueta="improve_db"):
         for paso in pasos:
             print()
@@ -1644,6 +2032,9 @@ Ejemplos:
         log.info("    (de los cuales %d son errores por archivo/medio)", errores_individuales)
     else:
         log.info("    (sin errores individuales por archivo/medio)")
+    if stats.get("salteados"):
+        log.info("  Salteados (sin red/componente): %d", stats["salteados"])
+        log.info("    (pasos salteados siguen pendientes; re-ejecutar con red/componente)")
 
     conn.close()
 
