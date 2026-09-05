@@ -586,7 +586,7 @@ function initUnificado(map) {{
     if (!src) return "";
     if (t === "image") {{
       return '<div style="margin:8px 0;text-align:center;">'
-        + '<img src="'+src+'" style="max-width:280px;max-height:220px;object-fit:contain;border-radius:4px;border:1px solid #ddd;display:block;margin:0 auto;" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\';">'
+        + '<img src="'+src+'" style="max-width:280px;max-height:220px;object-fit:contain;border-radius:4px;border:1px solid #ddd;display:block;margin:0 auto;" loading="lazy" onerror="this.style.display=&quot;none&quot;;this.nextElementSibling.style.display=&quot;block&quot;;">'
         + '<div style="display:none;font-size:11px;color:#999;padding:8px;border:1px dashed #ccc;border-radius:4px;">No se pudo cargar imagen<br><small style="word-break:break-all;">'+escHtml(src)+'</small></div>'
         + '<a href="'+src+'" target="_blank" style="font-size:11px;color:#3388ff;word-break:break-all;">Abrir original</a>'
         + '</div>';
