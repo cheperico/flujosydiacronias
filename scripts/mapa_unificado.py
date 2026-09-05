@@ -102,14 +102,31 @@ def _es_deploy_db(conn: sqlite3.Connection) -> bool:
 
 # ── Lectura local (media) ───────────────────────────────────────────────────
 
+def _ruta_a_file_uri(ruta: str | None) -> str | None:
+    if not ruta:
+        return None
+    from urllib.parse import quote
+    p = ruta.replace("\\", "/")
+    if p.startswith("file://"):
+        return p
+    # Windows absoluto C:/... -> file:///C:/... con encoding de espacios/acentos
+    if len(p) >= 2 and p[1] == ":":
+        # p = "C:/resto" -> file:///C:/resto%20con%20espacios
+        return "file:///" + p[0] + ":" + quote(p[2:], safe="/")
+    if p.startswith("/"):
+        return "file://" + quote(p, safe="/")
+    # relativo (deploy/media/...) -> dejar relativo pero con encoding
+    return quote(p, safe="/")
+
+
 def leer_puntos_base_local(conn: sqlite3.Connection) -> list[dict]:
-    """Lee media con GPS + flag has_transcription."""
-    # has_transcription via subquery
+    """Lee media con GPS + flag has_transcription + preview (path/texto)."""
     rows = conn.execute("""
         SELECT m.id, m.filename_original, m.type, m.subtype, m.carpeta,
                m.latitude, m.longitude, m.timestamp_utc, m.municipio, m.provincia,
-               m.altitude,
-               (SELECT COUNT(*) FROM media_keypoints k WHERE k.media_id=m.id AND k.key='transcription') as n_seg
+               m.altitude, m.filepath_absoluto,
+               (SELECT COUNT(*) FROM media_keypoints k WHERE k.media_id=m.id AND k.key='transcription') as n_seg,
+               (SELECT value FROM media_metadata mm WHERE mm.media_id=m.id AND mm.key='texto_completo' LIMIT 1) as texto_completo
         FROM media m
         WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL
         ORDER BY m.timestamp_utc ASC
@@ -120,7 +137,8 @@ def leer_puntos_base_local(conn: sqlite3.Connection) -> list[dict]:
             "id": r[0], "filename": r[1], "type": r[2] or "other", "subtype": r[3] or "",
             "carpeta": r[4] or "", "lat": r[5], "lon": r[6],
             "timestamp": r[7] or "", "municipio": r[8] or "", "provincia": r[9] or "",
-            "altitude": r[10], "n_seg": r[11] or 0,
+            "altitude": r[10], "filepath": r[11] or "", "n_seg": r[12] or 0,
+            "texto": (r[13] or "")[:2000] if r[13] else "",
         })
     return puntos
 
@@ -197,20 +215,42 @@ def _resolver_posicion_kp(mlat: float | None, mlon: float | None, ts_abs: str | 
 # ── Lectura deploy (medios/keypoints) ───────────────────────────────────────
 
 def leer_puntos_base_deploy(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute("""
-        SELECT id, archivo, tipo, subtipo, carpeta, latitud, longitud, fecha, hora, municipio, provincia,
-               (SELECT COUNT(*) FROM keypoints k WHERE k.media_id=medios.id AND k.kp_key='transcription') as n_seg
-        FROM medios WHERE latitud IS NOT NULL AND longitud IS NOT NULL ORDER BY fecha, hora
-    """).fetchall()
+    # Deploy schema: medios(ruta_absoluta, no filepath_absoluto) + sin media_metadata
+    try:
+        rows = conn.execute("""
+            SELECT id, archivo, tipo, subtipo, carpeta, latitud, longitud, fecha, hora, municipio, provincia,
+                   ruta_absoluta, titulo, transcripcion,
+                   (SELECT COUNT(*) FROM keypoints k WHERE k.media_id=medios.id AND k.kp_key='transcription') as n_seg
+            FROM medios WHERE latitud IS NOT NULL AND longitud IS NOT NULL ORDER BY fecha, hora
+        """).fetchall()
+        has_ruta = True
+    except sqlite3.OperationalError:
+        rows = conn.execute("""
+            SELECT id, archivo, tipo, subtipo, carpeta, latitud, longitud, fecha, hora, municipio, provincia,
+                   (SELECT COUNT(*) FROM keypoints k WHERE k.media_id=medios.id AND k.kp_key='transcription') as n_seg
+            FROM medios WHERE latitud IS NOT NULL AND longitud IS NOT NULL ORDER BY fecha, hora
+        """).fetchall()
+        has_ruta = False
     puntos = []
     for r in rows:
-        # r = 0:id 1:archivo 2:tipo 3:subtipo 4:carpeta 5:lat 6:lon 7:fecha 8:hora 9:municipio 10:provincia 11:n_seg
-        ts = f"{r[7]}T{r[8]}" if r[7] and r[8] else (r[7] or "")
+        if has_ruta:
+            # 0:id 1:archivo 2:tipo 3:subtipo 4:carpeta 5:lat 6:lon 7:fecha 8:hora 9:mun 10:prov 11:ruta_abs 12:titulo 13:transc 14:n_seg
+            ts = f"{r[7]}T{r[8]}" if r[7] and r[8] else (r[7] or "")
+            filepath = r[11] or (f"deploy/media/{r[4]}/{r[1]}" if r[4] and r[1] else "")
+            texto = (r[13] or r[12] or "")[:2000]
+            n_seg = r[14] or 0
+        else:
+            # 0:id 1:archivo 2:tipo 3:subtipo 4:carpeta 5:lat 6:lon 7:fecha 8:hora 9:mun 10:prov 11:n_seg
+            ts = f"{r[7]}T{r[8]}" if r[7] and r[8] else (r[7] or "")
+            filepath = f"deploy/media/{r[4]}/{r[1]}" if r[4] and r[1] else ""
+            texto = ""
+            n_seg = r[11] or 0
         puntos.append({
             "id": r[0], "filename": r[1], "type": r[2] or "other", "subtype": r[3] or "",
             "carpeta": r[4] or "", "lat": r[5], "lon": r[6],
             "timestamp": ts, "municipio": r[9] or "", "provincia": r[10] or "",
-            "altitude": None, "n_seg": r[11] or 0,
+            "altitude": None, "filepath": filepath, "n_seg": n_seg,
+            "texto": texto,
         })
     return puntos
 
@@ -332,12 +372,14 @@ def generar_mapa_unificado(
     m.fit_bounds(bounds)
 
     # Payload JSON embebido
-    # Simplificamos puntos_base para JS
     datos_js = []
     for p in puntos_base:
+        file_uri = _ruta_a_file_uri(p.get("filepath", ""))
+        # Para file:// necesitamos escapar espacios y chars, pero el browser lo resuelve
         datos_js.append({
             "id": p["id"], "f": p["filename"], "t": p["type"], "lat": p["lat"], "lon": p["lon"],
             "ts": p["timestamp"], "mun": p["municipio"], "prov": p["provincia"], "nseg": p["n_seg"],
+            "src": file_uri or "", "texto": (p.get("texto", "") or "")[:1500],
         })
     contexto_js = [{"id": c["id"], "mid": c["media_id"], "k": c["key"], "v": c["value"], "lat": c["lat"], "lon": c["lon"]} for c in contexto]
     waypoints_js = [{"id": w["id"], "n": w["name"], "c": w["category"], "lat": w["lat"], "lon": w["lon"]} for w in waypoints]
@@ -535,24 +577,60 @@ function initUnificado(map) {{
     }});
   }}
 
+  function escHtml(s) {{
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }}
+  function previewHtml(d) {{
+    var src = d.src || "";
+    var t = d.t;
+    if (!src) return "";
+    if (t === "image") {{
+      return '<div style="margin:8px 0;text-align:center;">'
+        + '<img src="'+src+'" style="max-width:280px;max-height:220px;object-fit:contain;border-radius:4px;border:1px solid #ddd;display:block;margin:0 auto;" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\';">'
+        + '<div style="display:none;font-size:11px;color:#999;padding:8px;border:1px dashed #ccc;border-radius:4px;">No se pudo cargar imagen<br><small style="word-break:break-all;">'+escHtml(src)+'</small></div>'
+        + '<a href="'+src+'" target="_blank" style="font-size:11px;color:#3388ff;word-break:break-all;">Abrir original</a>'
+        + '</div>';
+    }}
+    if (t === "video") {{
+      return '<div style="margin:8px 0;">'
+        + '<video controls preload="metadata" style="max-width:280px;max-height:220px;border-radius:4px;background:#000;display:block;width:100%;">'
+        + '<source src="'+src+'">Tu navegador no soporta video.</video>'
+        + '<a href="'+src+'" target="_blank" style="font-size:11px;color:#3388ff;word-break:break-all;">Abrir video</a>'
+        + '</div>';
+    }}
+    if (t === "audio") {{
+      return '<div style="margin:8px 0;">'
+        + '<audio controls preload="metadata" src="'+src+'" style="width:260px;display:block;"></audio>'
+        + '<a href="'+src+'" target="_blank" style="font-size:11px;color:#3388ff;word-break:break-all;">Abrir audio</a>'
+        + '</div>';
+    }}
+    if (t === "text") {{
+      var txt = d.texto ? escHtml(d.texto).replace(/\\n/g,'<br>') : "";
+      if (!txt) return "";
+      return '<div style="max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.4;border:1px solid #ddd;padding:8px;border-radius:4px;background:#fafafa;margin:8px 0;">'+txt+'</div>';
+    }}
+    return "";
+  }}
+
   // ── Crear marcadores base ──
   var marcadoresBase = [];
   DATOS.forEach(function(d) {{
     var hasSeg = SEGMENTOS[String(d.id)] && SEGMENTOS[String(d.id)].length > 0;
-    var popup = '<div style="font-family:Segoe UI,Arial,sans-serif;font-size:13px;min-width:220px;">'
-      + '<div style="font-weight:bold;border-bottom:2px solid '+(TIPO_COLOR[d.t]||"#3388ff")+';padding-bottom:4px;margin-bottom:6px;">'+d.f+'</div>'
+    var popup = '<div style="font-family:Segoe UI,Arial,sans-serif;font-size:13px;min-width:260px;max-width:320px;">'
+      + '<div style="font-weight:bold;border-bottom:2px solid '+(TIPO_COLOR[d.t]||"#3388ff")+';padding-bottom:4px;margin-bottom:6px;word-break:break-all;">'+escHtml(d.f)+'</div>'
+      + previewHtml(d)
+      + '<div style="font-size:12px;line-height:1.4;">'
       + '<div><b>Tipo:</b> '+d.t+' '+(d.nseg? '('+d.nseg+' segs)':'')+'</div>'
       + '<div><b>Fecha:</b> '+(d.ts||"—")+'</div>'
-      + '<div><b>Ubicación:</b> '+(d.prov||"—")+(d.mun?" , "+d.mun:"")+'</div>'
+      + '<div><b>Ubicación:</b> '+escHtml(d.prov||"—")+(d.mun?" , "+escHtml(d.mun):"")+'</div>'
       + '<div><b>Coords:</b> '+d.lat.toFixed(5)+', '+d.lon.toFixed(5)+'</div>'
+      + '</div>'
       + (hasSeg ? '<div style="margin-top:8px;"><button onclick="window._expandir('+d.id+')" style="background:'+(TIPO_COLOR[d.t]||"#3388ff")+';color:white;border:none;border-radius:4px;padding:6px 10px;cursor:pointer;width:100%;">▶ Desplegar '+SEGMENTOS[String(d.id)].length+' segmentos</button></div>' : '')
       + '<div id="btn-replegar-'+d.id+'" style="display:none;margin-top:6px;"><button onclick="window._replegar()" style="background:#666;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;width:100%;">✕ Replegar</button></div>'
       + '</div>';
     var m = L.marker([d.lat, d.lon], {{icon: tipoIcon(d.t), _tipo: d.t, _id: d.id, _hasSeg: hasSeg}});
-    m.bindPopup(popup, {{maxWidth:300}});
-    m.on('click', function() {{
-      // no auto-expandir; el usuario usa el botón
-    }});
+    m.bindPopup(popup, {{maxWidth:340}});
+    m.on('click', function() {{}});
     marcadoresBase.push(m);
   }});
 
