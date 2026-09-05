@@ -7,6 +7,21 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 53] — 2026-09-05 — Mapa unificado offline/online con clusters multicolor y expansión de transcripción
+
+### Añadido
+- **Mapa unificado** (`scripts/mapa_unificado.py`, `flujos.py`, `scripts/tiles_offline.py`): un punto por cada "algo" con GPS (2980 media + 1908 contexto+ubicacion_video + 28 waypoints opcionales); sin GPS se ignora, `telegram location` ignorado. Offline (`--modo offline`, default) lee `db/flujos.db` y genera `mapas/mapa_unificado.html` 100% autocontenido (tiles Esri zooms 5-7 embebidos + `Leaflet.markercluster@1.4.1` inline) para `file://` y TD Web Render; online (`--modo online --db deploy/db/visualizacion.db`) lee `medios`/`keypoints` del snapshot de `exportar_visualizacion.py` con tiles/markercluster por CDN. Clusters por ubicación: monocolor si 1 tipo, `conic-gradient` segmentado si mixto, `maxClusterRadius 50` + `spiderfy` + `chunkedLoading`.
+- **Transcripción desplegable en el mismo mapa**: `media_keypoints key='transcription'` (4790 segs, 226 medios) no es marcador base; se despliega como `CircleMarker` hijos + `Polyline` punteada al click en el popup `▶ Desplegar N segmentos` (1 activo, repliegue por `✕`/`Esc`/cambio de medio, `fitBounds`). Posición de cada segmento = `media.lat/lon` o `track_gpx.interpolar_posicion` en `timestamp_absolute`.
+- **Filtros y capas**: panel fijo con checkboxes por `type` (image/video/audio/text) + toggle `Contexto` (contexto_* por `CONTEXTO_COLOR`) + toggle `Waypoints` (capa opcional, apagada por defecto) + toggle `Clusters` y contador; track GPX como polyline.
+- **Tiles offline**: `tiles_offline.py` extendido con `MARKERCLUSTER_*_URL` y `descargar_assets(..., incluir_markercluster)` + `guardar_autocontenido` que detecta `markercluster` en el HTML y lo inlinea; `mapa_unificado.py` calcula `zooms_offline = zoom_fit_bounds ±1` para bounds nacional (evita 74k tiles de zooms 11-13, solo 48 tiles 5-7).
+- **CLI/TUI**: `flujos.py mapa-unificado`/`unificado` y `Visualizaciones → Mapas → 3) Mapa unificado` (pregunta modo/output/contexto/waypoints/cluster/segmentos/dry-run). `flujos.py --help` y TUI documentados. `AGENTS.md` estructura y catálogo, `README.md` tabla y árbol actualizados.
+
+### Cambiado
+- `scripts/tiles_offline.py` docstring/cabecera: menciona markercluster; `README.md` fila de `tiles_offline.py` y `scripts/mapa_unificado.py`.
+
+### Verificado
+- `python scripts/mapa_unificado.py --dry-run` 2980/1908/28/4790 OK; `flujos.py mapa-unificado --dry-run` OK; generación offline 3.1 MB autocontenido (48 data-uri tiles, 0 `unpkg` restante, `L.markerClusterGroup` presente), payloads 2980/1908/226 keys correctos; `--con-waypoints` 28 waypoints OK.
+
 ## [Entrega 52] — 2026-09-05 — Chiches v2.3: viento 40, lluvia 1.0, nubosidad, sol y geo con peso y sostenimiento
 
 ### Añadido

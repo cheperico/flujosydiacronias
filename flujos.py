@@ -139,13 +139,20 @@ COMANDOS:
                      Opciones: --output/-o RUTA --db RUTA --no-markers --road-colors --tolerancia-metros 1000 --umbral-gap-aviso 1800 --assets-cache DIR
                      Ej: python flujos.py mapa --road-colors --tolerancia-metros 500
 
-   mapa-municipios   Genera un mapa HTML por municipio recorrido, con variantes
-   (alias: mapas)    (ruta, puntos, contexto, gradiente). Nombre:
-                     mapa_municipio_<municipio>_<variante>.html (sin acentos:
-                     'Río Hondo' -> 'Rio_Hondo')
-                     Opciones: --output/-o DIR --db RUTA --variantes LISTA --municipio SUBSTR --mode skip|update --dry-run
-                               --tolerancia-metros 1000 --umbral-gap-aviso 1800 --no-embebido --zooms LISTA --tiles-cache DIR --assets-cache DIR
-                     Ej: python flujos.py mapa-municipios --variantes ruta,puntos --mode update
+    mapa-municipios   Genera un mapa HTML por municipio recorrido, con variantes
+    (alias: mapas)    (ruta, puntos, contexto, gradiente). Nombre:
+                      mapa_municipio_<municipio>_<variante>.html (sin acentos:
+                      'Río Hondo' -> 'Rio_Hondo')
+                      Opciones: --output/-o DIR --db RUTA --variantes LISTA --municipio SUBSTR --mode skip|update --dry-run
+                                --tolerancia-metros 1000 --umbral-gap-aviso 1800 --no-embebido --zooms LISTA --tiles-cache DIR --assets-cache DIR
+                      Ej: python flujos.py mapa-municipios --variantes ruta,puntos --mode update
+
+    mapa-unificado    Mapa unificado offline/online con clusters multicolor
+    (alias: unificado, y expansión de transcripción por segmentos en el mismo mapa.
+     unificado)        Opciones: --modo offline|online --db RUTA --output/-o RUTA --no-contexto --con-waypoints --sin-cluster --sin-segmentos --dry-run
+                      --tiles-cache DIR --assets-cache DIR
+                      Ej: python flujos.py mapa-unificado --modo offline
+                      Ej: python flujos.py mapa-unificado --modo online --db deploy/db/visualizacion.db
 
    export-csv        Exporta todas las tablas de la DB a archivos CSV (alias: csv).
    (alias: csv)      Opciones: --db RUTA --table TABLA --output DIR --list-tables --dry-run
@@ -2643,11 +2650,56 @@ def opcion_visualizaciones(db_path: str | None = None):
     ))
 
 
+def opcion_mapa_unificado(db_path: str | None = None):
+    """Menu: mapa unificado offline/online con clusters y expansión."""
+    limpiar_pantalla()
+    print("=== MAPA UNIFICADO (offline/online) ===\n")
+    print("  Un punto por cada 'algo' con GPS: media + contexto + waypoints (opcional).")
+    print("  Transcripción se despliega por segmentos en el mismo mapa (1 a la vez).")
+    print("  Clusters multicolor (1 tipo=sólido, mixto=conic-gradient).\n")
+    print("  Offline = db/flujos.db + HTML autocontenido (TD file://)")
+    print("  Online  = deploy/db/visualizacion.db + CDN\n")
+    modo = input("  Modo [offline/online] [offline]: ").strip().lower() or "offline"
+    if modo not in ("offline", "online"):
+        modo = "offline"
+    output = input(f"  Archivo de salida [mapas/mapa_unificado.html]: ").strip() or "mapas/mapa_unificado.html"
+    con_contexto = not _preguntar_sn("Omitir puntos de contexto")
+    con_waypoints = _preguntar_sn("Incluir waypoints (capa opcional)")
+    sin_cluster = _preguntar_sn("Desactivar clusters")
+    sin_segmentos = _preguntar_sn("Omitir segmentos de transcripción")
+    dry = _preguntar_sn("Solo dry-run (conteos)")
+    custom_db = input(f"  ?Usar otra DB? (default según modo) [Enter para default]: ").strip()
+    print(f"\n  Resumen: modo={modo} output={output} contexto={'SI' if con_contexto else 'NO'} waypoints={'SI' if con_waypoints else 'NO'}")
+    if not _preguntar_sn("Generar mapa"):
+        print("  Cancelado.")
+        pausa()
+        return
+    from scripts import mapa_unificado
+    args = ["--modo", modo, "--output", output]
+    if not con_contexto:
+        args.append("--no-contexto")
+    if con_waypoints:
+        args.append("--con-waypoints")
+    if sin_cluster:
+        args.append("--sin-cluster")
+    if sin_segmentos:
+        args.append("--sin-segmentos")
+    if dry:
+        args.append("--dry-run")
+    if custom_db:
+        args.extend(["--db", custom_db])
+    elif db_path and modo == "offline":
+        args.extend(["--db", db_path])
+    mapa_unificado.main(args)
+    pausa()
+
+
 def opcion_mapas(db_path: str | None = None):
     """Menu: mapas de la ruta y los municipios (Folium)."""
     _menu("MAPAS", {
         "1": ("Mapa de ruta (Folium)", lambda db: opcion_mapa()),
         "2": ("Mapas por municipio (Folium)", opcion_mapas_municipio),
+        "3": ("Mapa unificado (offline/online, clusters, segmentos)", opcion_mapa_unificado),
     }, db_path)
 
 
@@ -3567,6 +3619,10 @@ def main():
     elif comando in ("corregir-360", "corregir360"):
         from scripts import corregir_timestamp_360
         corregir_timestamp_360.main(resto)
+
+    elif comando in ("mapa-unificado", "unificado"):
+        from scripts import mapa_unificado
+        mapa_unificado.main(resto)
 
     else:
         print(f"Comando desconocido: {comando}")

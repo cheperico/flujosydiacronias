@@ -100,6 +100,7 @@ python flujos.py --help         # Ayuda general
 | `astronomia` | Calcular posición del sol (NOAA) + clasificación twilight |
 | `mapa` | Generar mapa interactivo Folium de la ruta |
 | `mapa-municipios` / `mapas` | Generar un mapa HTML por municipio recorrido (variantes ruta/puntos/contexto/gradiente) |
+| `mapa-unificado` / `unificado` | Mapa unificado offline/online con clusters multicolor y expansión de transcripción por segmentos |
 | `corregir-360` / `corregir360` | Corregir timestamps 360° Insta360 (CreateDate UTC→ART, --reubicar) — temporario |
 
 Cada subcomando acepta `--help` para ver sus opciones específicas.
@@ -200,11 +201,12 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
   │  ├─ p. << Anterior → Hoja 2
   │  └─ 0. Volver
 
-6. Visualizaciones
-  ├─ 1. Mapas
-  │   ├─ 1. Mapa de ruta (Folium)
-  │   └─ 2. Mapas por municipio (Folium)
-  │       └─ 0. Volver
+ 6. Visualizaciones
+   ├─ 1. Mapas
+   │   ├─ 1. Mapa de ruta (Folium)
+   │   ├─ 2. Mapas por municipio (Folium)
+   │   ├─ 3. Mapa unificado (offline/online, clusters, segmentos)
+   │   └─ 0. Volver
   ├─ 2. Exportar visualización web (deploy)
       ├─ 1. Deploy a deploy/ (pregunta si transcodificar)
       ├─ 2. Deploy a otra carpeta (pregunta si transcodificar)
@@ -263,7 +265,8 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/td/util_enter.py` | Helper compartido: `detener_con_enter()` devuelve un `threading.Event` (salida limpia con Enter) | Instalación |
 | `scripts/mapa_ruta.py` | Mapa interactivo con Folium: la línea usa el track GPX; los medios como marcadores. `--tolerancia-metros` reporta discrepancias media vs track. **HTML autocontenido** (assets JS/CSS inline) | Visualización |
 | `scripts/mapas_municipio.py` | Un mapa HTML por municipio recorrido, con variantes (`ruta`, `puntos`, `contexto`, `gradiente`). La línea de `ruta`/`contexto`/`gradiente` usa el tramo del track GPX del municipio. `--mode skip` genera solo los faltantes; `--mode update` regenera todos. Nombre: `mapa_municipio_<municipio>_<variante>.html` (slug ASCII, sin acentos: `'Río Hondo'`→`Rio_Hondo`). **HTML 100% autocontenido**: tiles de la vista inicial como data URIs + assets JS/CSS de Folium y fuentes inline → se abre en el Web Render TOP con cero red. `--no-embebido` deshabilita la incrustación de tiles | Visualización |
-| `scripts/tiles_offline.py` | Hace los mapas Folium autocontenidos para TouchDesigner: tiles de la vista inicial (data URIs, cache en `tiles_cache/`) y assets JS/CSS/fuentes de Folium (cache en `assets_cache/`, inline en el HTML) | Visualización |
+| `scripts/mapa_unificado.py` | Mapa unificado offline/online con clusters multicolor y expansión de transcripción. Offline lee `db/flujos.db` y genera HTML 100% autocontenido (tiles 5-7 + markercluster inline) para `file://`; online lee `deploy/db/visualizacion.db` con tiles/markercluster por CDN. Un punto por cada "algo" con GPS (media + contexto + waypoints opcional); transcripción se despliega por segmentos en el mismo mapa (1 activo, repliegue Esc/✕/cambio). Clusters: monocolor si 1 tipo, conic-gradient mixto | Visualización |
+| `scripts/tiles_offline.py` | Hace los mapas Folium autocontenidos para TouchDesigner: tiles de la vista inicial (data URIs, cache en `tiles_cache/`) y assets JS/CSS/fuentes de Folium + markercluster (cache en `assets_cache/`, inline en el HTML) | Visualización |
 | `scripts/track_gpx.py` | Helpers de tracks GPX: cargar, interpolar, tramo temporal, haversine, discrepancias media vs track | Visualización |
 | `scripts/check_db.py` | Inspección de la DB | Consulta |
 | `scripts/check_gps.py` | Verifica GPS en archivos via ExifTool | Consulta |

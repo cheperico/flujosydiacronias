@@ -68,6 +68,10 @@ ZOOMS_DEFAULT = [11, 12, 13]
 # Cache de tiles versionado por proveedor (Esri ≠ Carto en estilo).
 CACHE_DIR_DEFAULT = "tiles_cache/esri"
 CACHE_DIR_ASSETS_DEFAULT = "assets_cache"
+# MarkerCluster (para mapa_unificado.py) — CDN oficial unpkg
+MARKERCLUSTER_JS_URL = "https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"
+MARKERCLUSTER_CSS_URL = "https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css"
+MARKERCLUSTER_DEFAULT_CSS_URL = "https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css"
 # Zoom mínimo/máximo absolutos para el recorte del rango embebido.
 ZOOM_MIN_ABS = 4
 ZOOM_MAX_ABS = 18
@@ -374,7 +378,7 @@ def _descargar_a(url: str, ruta: str) -> None:
         f.write(datos)
 
 
-def descargar_assets(cache_dir: str = CACHE_DIR_ASSETS_DEFAULT) -> None:
+def descargar_assets(cache_dir: str = CACHE_DIR_ASSETS_DEFAULT, incluir_markercluster: bool = False) -> None:
     """Descarga/cachea los assets JS/CSS de Folium y las fuentes de íconos.
 
     Los assets ya presentes en `cache_dir/` no se re-descargan. Los fallos
@@ -391,6 +395,10 @@ def descargar_assets(cache_dir: str = CACHE_DIR_ASSETS_DEFAULT) -> None:
         pendientes.append((os.path.join(cache_dir, "css", name), url))
     for nombre_font, url in fuentes.items():
         pendientes.append((os.path.join(cache_dir, "fuentes", nombre_font), url))
+    if incluir_markercluster:
+        pendientes.append((os.path.join(cache_dir, "js", "leaflet.markercluster.js"), MARKERCLUSTER_JS_URL))
+        pendientes.append((os.path.join(cache_dir, "css", "MarkerCluster.css"), MARKERCLUSTER_CSS_URL))
+        pendientes.append((os.path.join(cache_dir, "css", "MarkerCluster.Default.css"), MARKERCLUSTER_DEFAULT_CSS_URL))
     nuevos = [p for p in pendientes if not os.path.isfile(p[0])]
     if not nuevos:
         return
@@ -475,6 +483,9 @@ def guardar_autocontenido(
     contenido inline. Si el set de assets no está completo (p. ej. sin internet
     al generar), guarda con `mapa.save(ruta)` normal (CDN).
 
+    Si el HTML contiene referencias a markercluster (mapa_unificado.py offline),
+    también las inlinea.
+
     Args:
         mapa: objeto folium.Map ya construido.
         ruta: ruta de salida del HTML.
@@ -483,8 +494,16 @@ def guardar_autocontenido(
     Returns:
         True si se guardó autocontenido; False si se usó el fallback CDN.
     """
+    necesita_markercluster = False
+    # Detectar si el mapa ya contiene referencias a markercluster (inyección previa)
     try:
-        descargar_assets(cache_dir)
+        html_probe = mapa.get_root().render()
+        if "markercluster" in html_probe.lower():
+            necesita_markercluster = True
+    except Exception:
+        pass
+    try:
+        descargar_assets(cache_dir, incluir_markercluster=necesita_markercluster)
     except Exception as e:  # noqa: BLE001
         log.warning("No se pudieron obtener assets offline; mapa con CDN: %s", e)
         mapa.save(ruta)
@@ -503,6 +522,20 @@ def guardar_autocontenido(
         html = _reemplazar_link_css(
             html, url, _leer_texto(os.path.join(cache_dir, "css", name))
         )
+    # MarkerCluster inline si está presente
+    if necesita_markercluster:
+        for url, fname in [
+            (MARKERCLUSTER_JS_URL, "leaflet.markercluster.js"),
+            (MARKERCLUSTER_CSS_URL, "MarkerCluster.css"),
+            (MARKERCLUSTER_DEFAULT_CSS_URL, "MarkerCluster.Default.css"),
+        ]:
+            ruta_asset = os.path.join(cache_dir, "js" if fname.endswith(".js") else "css", fname)
+            if os.path.isfile(ruta_asset):
+                contenido = _leer_texto(ruta_asset)
+                if fname.endswith(".js"):
+                    html = _reemplazar_script(html, url, contenido)
+                else:
+                    html = _reemplazar_link_css(html, url, contenido)
     html = inline_fuentes(html, cache_dir)
     with open(ruta, "w", encoding="utf-8") as f:
         f.write(html)
