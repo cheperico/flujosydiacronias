@@ -653,22 +653,22 @@ function initUnificado(map) {{
   }});
 
   function rebuildLayers() {{
-    // Filtros por tipo
     var activos = new Set();
     document.querySelectorAll('.filtro-tipo:checked').forEach(function(cb){{ activos.add(cb.value); }});
     var conCtx = document.getElementById('filtro-contexto').checked;
     var conWpt = document.getElementById('filtro-waypoints').checked;
-
-    // Limpiar
-    if (clusterGroup) clusterGroup.clearLayers();
+    var clusterActivo = clusterGroup && map.hasLayer(clusterGroup);
+    // Limpiar solo la capa activa
+    if (clusterActivo) clusterGroup.clearLayers();
     else capaBase.clearLayers();
     capaContexto.clearLayers();
     capaWaypoints.clearLayers();
+    if (map.hasLayer(capaWaypoints)) map.removeLayer(capaWaypoints);
 
     var visibles = 0;
     marcadoresBase.forEach(function(m) {{
       if (activos.has(m.options._tipo)) {{
-        if (clusterGroup) clusterGroup.addLayer(m);
+        if (clusterActivo) clusterGroup.addLayer(m);
         else m.addTo(capaBase);
         visibles++;
       }}
@@ -678,12 +678,9 @@ function initUnificado(map) {{
       visibles += marcadoresContexto.length;
     }}
     if (conWpt) {{
-      // waypoints no clusterizan (pocos)
-      marcadoresWaypoints.forEach(function(m){{ m.addTo(capaWaypoints); if(conWpt) capaWaypoints.addTo(map); }});
-      if (conWpt) visibles += marcadoresWaypoints.length;
-      else map.removeLayer(capaWaypoints);
-    }} else {{
-      map.removeLayer(capaWaypoints);
+      marcadoresWaypoints.forEach(function(m){{ m.addTo(capaWaypoints); }});
+      capaWaypoints.addTo(map);
+      visibles += marcadoresWaypoints.length;
     }}
     document.getElementById('contador-puntos').textContent = visibles + " puntos visibles";
   }}
@@ -694,22 +691,16 @@ function initUnificado(map) {{
   document.getElementById('filtro-waypoints').addEventListener('change', rebuildLayers);
   document.getElementById('toggle-cluster').addEventListener('change', function(e) {{
     if (e.target.checked) {{
-      if (!map.hasLayer(clusterGroup) && clusterGroup) {{
-        // mover marcadores base al cluster
+      if (clusterGroup && !map.hasLayer(clusterGroup)) {{
         capaBase.clearLayers();
+        map.addLayer(clusterGroup);
         rebuildLayers();
-        // ocultar capaBase, mostrar cluster
-        if (clusterGroup) map.addLayer(clusterGroup);
       }}
     }} else {{
       if (clusterGroup && map.hasLayer(clusterGroup)) {{
         clusterGroup.clearLayers();
         map.removeLayer(clusterGroup);
-        // pasar a capaBase
-        marcadoresBase.forEach(function(m){{
-          var cb = document.querySelector('.filtro-tipo[value="'+m.options._tipo+'"]');
-          if (cb && cb.checked) m.addTo(capaBase);
-        }});
+        rebuildLayers();
       }}
     }}
   }});
