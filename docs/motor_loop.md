@@ -151,23 +151,31 @@ Si no hay criterios, se incluyen todos los medios (modo exploración).
 
 ---
 
-## 5. Chiches (eventos ambientales)
+## 5. Chiches (eventos ambientales) — v2.3
 
 Se calculan a partir de los campos calculados de la DB y se disparan en
-el instante del loop donde la condición está activa (en h del arco):
+el instante del loop donde la condición está activa (en h del arco).
+Cada chiche tiene `t_loop` + `hora` y se ubica geográficamente (`lat/lon/municipio/provincia/departamento` del medio que lo disparó).
 
-| Chiche | Condición (en la columna de DB) |
-|--------|----------------------------------|
-| "Salió el sol" | `sun_elevation` cruza 0° (al alba) en el segmento |
-| "Es el mediodía" | `secs_since_noon ≈ 0` |
-| "Hace calor" | `weather_temp_c > 30` |
-| "Hace frío" | `weather_temp_c < 10` |
-| "Hay mucho viento" | `weather_wind_speed_kmh > 30` |
-| "Está lloviendo" | `weather_precip_mm > 0` |
-| "Es la noche" | `twilight_period IN ('crepúsculo_*','noche')` |
+| Familia | Texto (variantes true-random) | Condición (DB) | Sostenido |
+|---|---|---|---|
+| `alba` | "Salió el sol" | `0 ≤ sun_elevation ≤ 3` | no |
+| `mediodia` | "Es el mediodía" | `abs(secs_since_noon) ≤ 900` | no |
+| `calor` | "Hace calor" 90% / "La calor que hace" 10% | `weather_temp_c > 30` | no |
+| `frio` | "Hace frío" | `weather_temp_c < 10` | no |
+| `viento` | "Hay mucho viento" 75% / "Se nos vuelan las chapas" 25% | `weather_wind_speed_kmh > 40` | **sí ≥2** |
+| `lluvia` | "Está lloviendo" 90% / "Se largó ya" 10% | `weather_precip_mm > 1.0` | **sí ≥2** |
+| `nublado` | "Está nublado" | `weather_cloud_pct ≥ 70` (o WMO code 3) | **sí ≥2** |
+| `despejado` | "Cielo despejado" | `weather_cloud_pct ≤ 20` (o WMO 0-1) | **sí ≥2** |
+| `sol` | "Pega el sol" / "El sol castiga" / "El sol pega fuerte" (33% c/u) | `despejado + temp>28 + sun_elevation>20 + twilight=dia` | **sí ≥2** |
+| `noche` | "Es la noche" | `twilight_period IN ('crepúsculo_*','noche')` | no |
+| `geo` | "Entramos a X" / "Salimos de Y" (por provincia/depto/municipio) | cambio de `provincia/departamento/municipio` en secuencia ordenada por `hora` | no |
 
-Cada chiche tiene una posición `t_loop` (igual cálculo que un medio) y se
-emite como evento `{"t": t, "tipo": "chiche", "texto": ...}`.
+**Sostenido ≥2:** las familias `viento/lluvia/nublado/despejado/sol` solo se emiten cuando la condición lleva 2 medios consecutivos (mitiga transiciones horarias de Open-Meteo; `SOSTEN_MIN=2` en `loop_db.py`). Dedup por `(familia, int(hora))`, no por texto literal.
+
+**Geo:** ingresos/egresos se detectan en orden **geográfico** (`items` ordenados por `cumul_distance_m`, con fallback a `timestamp_utc`) para no zigzaguear por hora del día; se posicionan igual por `hora` (`t_loop`) y se ubican con `lat/lon` del medio que marca el cambio. Primer medio genera solo "Entramos".
+
+Se emite como `{"t": t_loop, "tipo":"chiche", "texto":..., "familia":..., "hora":..., "lat":..., "lon":..., "municipio":..., "provincia":..., "departamento":..., "ubicacion":{lat,lon}}`. Wire OSC 9002: `/flujos/fluir/chiche <hora> <texto> [lat] [lon] [municipio] [provincia] [departamento]` → `fluir_chiches [hora,texto,lat,lon,municipio,provincia,departamento]`.
 
 ---
 

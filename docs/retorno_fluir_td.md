@@ -37,8 +37,8 @@ Python: puente_td.py modo fluir
    │       /flujos/fluir/texto  <media_id> <titulo> <texto>   (solo type='text', justo después de su /medio)
    │           Contenido real del texto como unidad de medio (titulo_seccion + texto_completo);
    │           la ruta .md del /medio no sirve para visualizar.
-   │     /flujos/fluir/chiche <hora> <texto>   (0..N)
-   │     /flujos/fluir/mensaje <id> <from> <texto> <hora> <fecha> <tipo> <fotos> <municipio>  (0..N, solo con municipios)
+    │     /flujos/fluir/chiche <hora> <texto> [lat] [lon] [municipio] [provincia] [departamento]  (0..N)
+    │     /flujos/fluir/mensaje <id> <from> <texto> <hora> <fecha> <tipo> <fotos> <municipio>  (0..N, solo con municipios)
    │     /flujos/fluir/mapa <municipio> <ruta>   (0..N, solo con municipios)
    │     /flujos/fluir/fin   <total>
    ▼
@@ -59,8 +59,8 @@ Python: puente_td.py modo fluir
    (consumo, opcional según etapa visual)
    ├── fluir_estado      (Table DAT clave-valor: total, loop_secs, por tipo, fin, recibidos/esperados)
    ├── fluir_fotos / fluir_videos / fluir_videos_360 / fluir_sonidos / fluir_textos  (Tablas por tipo; fluir_textos suma titulo/texto)
-   ├── fluir_chiches     (Table DAT: hora, texto)
-   ├── fluir_telegram    (Table DAT: id, from_name, texto, hora, fecha, tipo, fotos, municipio)
+    ├── fluir_chiches     (Table DAT: hora, texto, lat, lon, municipio, provincia, departamento)
+    ├── fluir_telegram    (Table DAT: id, from_name, texto, hora, fecha, tipo, fotos, municipio)
    ├── fluir_mapas       (Table DAT: municipio, ruta)
    ├── fluir_loop        (Timeline o Count CHOP en loop 0..loop_secs)
    └── fluir_movie       (Movie File In TOP) → reproducción del loop
@@ -88,7 +88,7 @@ Antes de armar ningún operador hay que fijar el wire — esto lo escribe
 | 4 | `/flujos/fluir/medio` (×cantidad) | `i:media_id`, `s:ruta`, `f:keypoint`, `f:hora`, `s:tipo` | Un medio por mensaje; el tipo es el del bloque |
 | 5 (solo type='text', justo después de su /medio) | `/flujos/fluir/texto` | `i:media_id`, `s:titulo`, `s:texto` | Contenido real del texto como unidad de medio: `titulo_seccion` + `texto_completo` (se escribe en las columnas `titulo`/`texto` de `fluir_textos`; la ruta `.md` del `/medio` no sirve para visualizar) |
 | — (se repite tabla+medio (+texto si type='text') para cada tipo con medios) | | | |
-| 6 | `/flujos/fluir/chiche` (0..N) | `f:hora`, `s:texto` | Un chiche climático/astronómico |
+| 6 | `/flujos/fluir/chiche` (0..N) | `f:hora`, `s:texto`, `s:lat`, `s:lon`, `s:municipio`, `s:provincia`, `s:departamento` | Un chiche climático/astronómico/geográfico (args 3-7 opcionales para compat, con `lat/lon` y ubicación del medio que lo disparó) |
 | 7 (solo si hay municipios elegidos; tras chiches, antes de /fin) | `/flujos/fluir/tabla telegram` + `/flujos/fluir/mensaje` (×N) | `/tabla`: `s:telegram`, `i:cantidad`; `/mensaje`: `i:id`, `s:from_name`, `s:texto`, `f:hora`, `s:fecha`, `s:tipo`, `s:fotos`, `s:municipio` | Bloque del chat de Telegram: un mensaje por fila en `fluir_telegram`. `hora` es la **local** (UTC−3) de llegada; `fotos` es JSON de media_ids de fotos; `tipo` = message_type. No cuenta en los `recibidos/esperados` del `/fin` (valida medios) |
 | 8 (solo si hay municipios elegidos) | `/flujos/fluir/mapa` (× municipios) | `s:municipio`, `s:ruta` | Ruta **absoluta** al mapa HTML del municipio (generado por `scripts/mapas_municipio.py`, variante `ruta`) → fila `[municipio, ruta]` en `fluir_mapas`. TD la usa para renderizar el mapa (Web Render). No cuenta en los `recibidos/esperados` del `/fin` |
 | 9 | `/flujos/fluir/fin` | `i:int total` | Marca de finalización del lote |
@@ -242,7 +242,7 @@ El cerebro Python (`scripts/td/puente_td.py` modo 'fluir') envía por el puerto
         /flujos/fluir/texto <media_id> <titulo> <texto>   (solo para medios text, justo después de su /medio)
             Contenido real del texto como unidad de medio (titulo_seccion + texto_completo).
             Escribe titulo/texto en la fila del media_id en fluir_textos.
-    /flujos/fluir/chiche <hora> <texto>   (0..N, chiches climáticos/astronómicos)
+    /flujos/fluir/chiche <hora> <texto> [lat] [lon] [municipio] [provincia] [departamento]   (0..N, chiches climático/astronómico/geográficos; args extra opcionales con ubicación)
     /flujos/fluir/mensaje <id> <from_name> <texto> <hora> <fecha> <tipo> <fotos> <municipio>
         (0..N, solo si el visitante eligió municipio(s)) Un mensaje de Telegram del
         chat (es_sistema=0) dentro del rango de fechas de los municipios elegidos.
@@ -272,7 +272,7 @@ titulo/texto para el contenido real del medio, ver abajo):
   fluir_videos_360 [media_id, ruta, keypoint, hora, tipo]  <- video360
   fluir_sonidos [media_id, ruta, keypoint, hora, tipo]  <- audio
   fluir_textos  [media_id, ruta, keypoint, hora, tipo, titulo, texto]  <- text
-  fluir_chiches [hora, texto]
+   fluir_chiches [hora, texto, lat, lon, municipio, provincia, departamento]
   fluir_telegram [id, from_name, texto, hora, fecha, tipo, fotos, municipio]  <- telegram (chat)
   fluir_mapas   [municipio, ruta]  <- mapa HTML del municipio (ruta absoluta)
 

@@ -27,27 +27,22 @@ Medios crudos
      │
      ▼
 ┌─────────────────────────────┐
-│ 3. MEJORAR DB               │  python flujos.py improve-db [--mode]
-│    ├─ colors                │  Colores dominantes (reprocesar)
-│    ├─ keywords              │  Palabras clave con IA (Ollama)
-│    ├─ descriptions          │  Descripción con IA (Ollama)
-│    ├─ transcribe            │  Transcripción (faster-whisper)
-│    ├─ keypoints             │  Segmentos de transcripción
-│    ├─ timestamps            │  Inferir timestamp desde EXIF
-│    ├─ gps                   │  Inferir GPS desde EXIF
-│    └─ video_metadata        │  Metadatos de cámara/360° en videos
+│ 3. MEJORAR DB               │  python flujos.py improve-db [--mode]  (~22 pasos)
+│    ├─ 1 Todos / 2 Manual    │  Todos = todos los pasos (overnight, skip, saltea sin red y avisa)
+│    ├─ Imagenes              │  colors, keywords, descriptions, combinado, video_metadata
+│    ├─ Audios                │  transcribe, keypoints, audio_tagging, kw_transcripcion
+│    ├─ Videos                │  transcribe, audio_tagging, analizar_video, keypoints_video/contexto
+│    ├─ Textos                │  kw_texto, refinar
+│    └─ Enriquecimiento/Curaduria │  refinar, limpiar_descripciones, timestamps, gps, geocode, gradiente, weather, dia_semana, astronomia
 └─────────────────────────────┘
-     │
-     ▼
+      │
+      ▼
 ┌─────────────────────────────┐
-│ 4. ENRIQUECER               │  Scripts independientes con --mode
-│    ├─ dia_semana.py         │  Día de la semana (lunes..domingo)
-│    ├─ fetch_weather.py      │  Clima histórico (Open-Meteo)
-│    ├─ geocode.py            │  Provincia/municipio/localidad (Georef)
-│    ├─ gradiente.py          │  Distancia, elevación, pendiente GPS
-│    ├─ astronomia.py         │  Posición del sol, clasificación twilight
-│    ├─ keywords_transcripciones.py │  Keywords del sentido (transcripciones y textos, Ollama texto)
-│    └─ audio_tagging.py      │  Sonidos ambientales (sherpa-onnx CED-mini)
+│ 4. CONSULTAR / EXPORTAR     │  (geocode/weather/etc. ya estan en 3.7 via improve-db)
+│    ├─ dia_semana.py*        │  Día de la semana (tambien via improve-db)
+│    ├─ fetch_weather.py*     │  Clima histórico (tambien via improve-db)
+│    ├─ geocode.py*           │  Provincia/municipio (tambien via improve-db)
+│    └─ ...                   │  *tambien ejecutables standalone con --mode
 └─────────────────────────────┘
      │
      ▼
@@ -78,7 +73,7 @@ python flujos.py --help         # Ayuda general
 | Comando | Qué hace |
 |---------|----------|
 | `ingest --root CARPETA [--types TIPOS] [--recursive] [--allow-no-timestamp] [--dry-run]` | Ingerir medios desde una carpeta. `--types` filtra por tipo (image,video,audio,text). `--allow-no-timestamp` ingiere archivos sin timestamp. |
-| `improve-db [--mode] [--steps]` | Post-procesamiento (9 pasos: colors, keywords, descriptions, combinado, transcribe, keypoints, timestamps, gps, video_metadata) |
+| `improve-db [--mode] [--steps]` | Post-procesamiento (~22 pasos: colors, keywords, descriptions, combinado, transcribe, keypoints, timestamps, gps, video_metadata, audio_tagging, kw_transcripcion, kw_texto, refinar, geocode, gradiente, weather, dia_semana, astronomia, analizar_video, keypoints_video, keypoints_contexto, limpiar_descripciones). `1 Todos` y `2 Manual` cubren todos (overnight, saltea sin red y avisa) |
 | `geocode [--mode]` | Geocodificación inversa (GPS → provincia/municipio/localidad) |
 | `gradient [--mode]` | Calcular gradientes de ruta entre puntos GPS |
 | `query [--distinct --where --search --count --limit]` | Consultar la base de datos |
@@ -126,62 +121,40 @@ Al ejecutar `python flujos.py` sin argumentos se ingresa al menú TUI:
   ├─ 4. Ingerir chat de Telegram
   └─ 5. Deshacer ingesta
 
-3. Mejorar base de datos
-  ├─ Hoja 1: IA y color
-  │  ├─ 1. Todos los pasos (skip)
-  │  ├─ 2. Elegir pasos manualmente
-  │  ├─ 3. Colores dominantes
-  │  ├─ 4. Keywords con IA
-  │  ├─ 5. Descripcion con IA
-  │  ├─ 6. Keywords + Descripcion (pasada unica, mas lenta)
-  │  ├─ 7. Audio tagging (sonidos ambientales)
-  │  ├─ 8. Transcripcion (audios/videos)
-  │  ├─ 9. Keypoints de transcripciones
-  │  ├─ n. Siguiente >> → Hoja 2
-  │  └─ 0. Volver
-  ├─ Hoja 2: Etiquetado + inferencia y ubicacion
-  │  ├─ 1. Keywords desde textos y transcripciones
-  │  │   ├─ 1. Desde transcripciones (audio/video)
-  │  │   │   ├─ 1. Procesar (solo pendientes)
-  │  │   │   ├─ 2. Re-procesar todos (update)
-  │  │   │   ├─ 3. Limpiar y regenerar (replace)
-  │  │   │   ├─ 4. Previsualizar (dry-run)
-  │  │   │   └─ 0. Volver
-  │  │   ├─ 2. Desde textos (.md ingresados)
-  │  │   │   └─ (mismos 4 modos + 0. Volver)
-  │  │   └─ 0. Volver
-  │  ├─ 2. Refinar keywords (normalizar + sinonimos)
-  │  │   ├─ 1. Imagenes (ia_keywords)
-  │  │   │   ├─ 1. Refinar todos (update)
-  │  │   │   ├─ 2. Previsualizar (dry-run)
-  │  │   │   └─ 0. Volver
-  │  │   ├─ 2. Transcripciones (ia_keywords_transcripcion)
-  │  │   ├─ 3. Textos (ia_keywords_texto)
-  │  │   └─ 0. Volver
-  │  ├─ 3. Inferir timestamps
-  │  ├─ 4. Inferir GPS
-  │  ├─ 5. Calcular gradientes de ruta
-  │  ├─ 6. Localizacion (provincia, municipio, localidad)
-  │  ├─ 7. Condiciones climaticas
-  │  ├─ 8. Dia de la semana
-  │  ├─ 9. Posicion del sol (astronomia)
-  │  ├─ p. << Anterior → Hoja 1
-  │  ├─ n. Siguiente >> → Hoja 3
-  │  └─ 0. Volver
-  ├─ Hoja 3: Analisis de video
-  │  ├─ 1. Analizar video (escenas + IA)
-  │  │   ├─ 1. Analizar un video individual
-  │  │   ├─ 2. Analizar todos los pendientes de la DB
-  │  │   ├─ 3. Previsualizar (dry-run)
-  │  │   └─ 0. Volver
-  │  ├─ 2. Keypoints de contexto (devenir geografico)
-  │  │   ├─ 1. Procesar (solo pendientes)
-  │  │   ├─ 2. Re-procesar todos (update)
-  │  │   ├─ 3. Limpiar y regenerar (replace)
-  │  │   ├─ 4. Previsualizar (dry-run)
-  │  │   └─ 0. Volver
-  │  ├─ p. << Anterior → Hoja 2
-  │  └─ 0. Volver
+3. Mejorar base de datos (7 grupos, Todos realmente todos)
+  ├─ 1. Todos los pasos (overnight, skip, saltea sin red/componente y avisa)
+  ├─ 2. Elegir pasos manualmente (lista DEP_ORDER + validacion)
+  ├─ 3. Imagenes
+  │  ├─ 1. Colores dominantes
+  │  ├─ 2. Keywords con IA
+  │  ├─ 3. Descripcion con IA
+  │  ├─ 4. Keywords+Descripcion (1 vision+1 traduccion)
+  │  └─ 5. Metadatos de video (ExifTool 360)
+  ├─ 4. Audios (repeticion permitida con Videos)
+  │  ├─ 1. Transcripcion (faster-whisper)
+  │  ├─ 2. Keypoints de transcripciones
+  │  ├─ 3. Audio tagging (sonidos ambientales)
+  │  └─ 4. Keywords del sentido (transcripciones)
+  ├─ 5. Videos (repeticion permitida con Audios)
+  │  ├─ 1. Transcripcion (faster-whisper)
+  │  ├─ 2. Audio tagging (sonidos ambientales)
+  │  ├─ 3. Analizar video por escenas (ffmpeg+minicpm)
+  │  ├─ 4. Keypoints por escena (desde video_analysis)
+  │  ├─ 5. Keypoints de contexto (track GPX)
+  │  └─ 6. Metadatos de video (ExifTool 360)
+  ├─ 6. Textos
+  │  ├─ 1. Keywords del sentido (textos .md)
+  │  └─ 2. Refinar keywords (texto)
+  └─ 7. Enriquecimiento / Curaduria (transversal)
+     ├─ 1. Refinar keywords (imagenes)
+     ├─ 2. Limpiar descripciones (eco del prompt)
+     ├─ 3. Inferir timestamps
+     ├─ 4. Inferir GPS
+     ├─ 5. Geocodificacion (Georef -> prov/municipio)
+     ├─ 6. Gradientes de ruta
+     ├─ 7. Clima historico (Open-Meteo)
+     ├─ 8. Dia de la semana
+     └─ 9. Posicion del sol / twilight (NOAA)
 
 4. Consultar base de datos
   ├─ 1. Ver resumen de la DB (totales, salud, batches, GPS, signo)
@@ -270,7 +243,7 @@ Todas las operaciones que modifican la DB preguntan el modo
 | `scripts/ingest.py` | Escanea, extrae metadatos e ingiere en DB | Ingesta |
 | `scripts/ingest_gpx.py` | Ingesta de tracks GPS (GPX): waypoints, registro, backfill de altitud | Ingesta |
 | `scripts/import_telegram.py` | Importa exports de Telegram a la DB (chats, mensajes, multimedia vinculado y opcionalmente en `media`) | Ingesta |
-| `scripts/improve_db.py` | 9 pasos post-`ingest` (colors, keywords, descriptions, combinado, transcribe, keypoints, timestamps, gps, video_metadata) | Mejora |
+| `scripts/improve_db.py` | ~22 pasos post-`ingest` (colors, keywords, descriptions, combinado, transcribe, keypoints, timestamps, gps, video_metadata, audio_tagging, kw_transcripcion, kw_texto, refinar, geocode, gradiente, weather, dia_semana, astronomia, analizar_video, keypoints_video, keypoints_contexto, limpiar_descripciones). `Todos`/`Manual` cubren todos con reporte de salteados | Mejora |
 | `scripts/query.py` | Consultas a la DB | Consulta |
 | `scripts/exportar_csv.py` | Exporta tablas de la DB a CSV | Consulta |
 | `scripts/relocate.py` | Actualiza rutas absolutas cuando los archivos se mudan | Gestión |
@@ -785,7 +758,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 │   ├── ingest.py              # Ingesta de medios
 │   ├── ingest_gpx.py          # Ingesta de tracks GPS (GPX)
 │   ├── import_telegram.py     # Importar export de Telegram
-│   ├── improve_db.py          # Post-procesamiento (9 pasos)
+│   ├── improve_db.py          # Post-procesamiento (~22 pasos, Todos realmente todos)
 │   ├── query.py               # Consultas a DB
 │   ├── exportar_csv.py        # Exportar DB a CSV
 │   ├── relocate.py            # Relocalizar medios

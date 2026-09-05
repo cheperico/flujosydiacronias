@@ -159,20 +159,19 @@ seleccionados.
 
 ---
 
-## 5. "Chiches" (eventos ambientales)
+## 5. "Chiches" (eventos ambientales) — v2.3
 
 Triggers que se disparan en el momento del loop donde esa condición está
-activa. Todos los datos ya están calculados en la DB:
+activa. Todos los datos ya están calculados en la DB (ver `docs/motor_loop.md` §5 para tabla completa):
 
-| Chiche | Condición (dato en DB) |
-|--------|------------------------|
-| "Salió el sol" | el cursor horario cruza la elevación solar 0° (`sun_elevation`, `twilight_period`) |
-| "Es el mediodía" | `secs_since_noon ≈ 0` |
-| "Hace calor" | `weather_temp_c > 30°` |
-| "Hace frío" | `weather_temp_c < 10°` |
-| "Hay mucho viento" | `weather_wind_speed_kmh > 30` |
-| "Está lloviendo" | `weather_precip_mm > 0` |
-| *(extensible)* | "Es de noche", "Llegamos a Tucumán", etc. |
+* Viento `>40 km/h` con variantes `"Hay mucho viento"` 75% / `"Se nos vuelan las chapas"` 25% (sostenido ≥2)
+* Lluvia `>1.0 mm` con variantes `"Está lloviendo"` 90% / `"Se largó ya"` 10% (sostenido ≥2)
+* Nubosidad `"Está nublado"` (≥70%) / `"Cielo despejado"` (≤20%) + compuesto `"Pega el sol"` / `"El sol castiga"` / `"El sol pega fuerte"` (despejado+calor, sostenido)
+* Calor con variante `"La calor que hace"` 10% (true random)
+* Geo: ingresos/egresos a provincia/departamento/municipio (`"Entramos a X"` / `"Salimos de Y"`), ubicados con `lat/lon` del medio que lo disparó
+* Sol alba/mediodía/noche se mantienen
+
+Cada chiche lleva `hora + lat/lon/municipio/provincia/departamento` (wire `/chiche` extendido → `fluir_chiches` de 7 columnas).
 
 ---
 

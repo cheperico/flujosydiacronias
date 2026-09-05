@@ -8,14 +8,14 @@
 #     fluir_videos_360 [media_id, ruta, keypoint, hora, tipo]
 #     fluir_sonidos  [media_id, ruta, keypoint, hora, tipo]
 #     fluir_textos   [media_id, ruta, keypoint, hora, tipo, titulo, texto]
-#     fluir_chiches  [hora, texto]
+#     fluir_chiches  [hora, texto, lat, lon, municipio, provincia, departamento]
 #     fluir_telegram [id, from_name, texto, hora, fecha, tipo, fotos, municipio]
 #     fluir_mapas    [municipio, ruta]
 #
 # Los headers son EXACTOS a los que escribe fluir_callbacks.dat
 # (HEADER_MEDIO para las tablas de medios, HEADER_TEXTO para fluir_textos,
 # HEADER_TELEGRAM para fluir_telegram, HEADER_MAPA para fluir_mapas,
-# ["clave","valor"], ["hora","texto"]). No cambiarlos.
+# ["clave","valor"], ["hora","texto","lat","lon","municipio","provincia","departamento"]). No cambiarlos.
 #
 # IDEMPOTENTE: si la tabla ya existe NO se pisa; solo se normaliza la fila 0
 # (header). Se puede volver a correr en un toe ya armado sin romper nada.
@@ -53,7 +53,7 @@ TABLAS = {
     "fluir_videos_360": ["media_id", "ruta", "keypoint", "hora", "tipo"],
     "fluir_sonidos": ["media_id", "ruta", "keypoint", "hora", "tipo"],
     "fluir_textos": ["media_id", "ruta", "keypoint", "hora", "tipo", "titulo", "texto"],
-    "fluir_chiches": ["hora", "texto"],
+    "fluir_chiches": ["hora", "texto", "lat", "lon", "municipio", "provincia", "departamento"],
     "fluir_telegram": ["id", "from_name", "texto", "hora", "fecha", "tipo", "fotos", "municipio"],
     "fluir_mapas": ["municipio", "ruta"],
 }

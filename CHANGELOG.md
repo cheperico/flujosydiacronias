@@ -7,6 +7,21 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 52] — 2026-09-05 — Chiches v2.3: viento 40, lluvia 1.0, nubosidad, sol y geo con peso y sostenimiento
+
+### Añadido
+- **Chiches climáticos ampliados**: `weather_cloud_pct`/`weather_code` → `"Está nublado"` (≥70% o WMO 3) y `"Cielo despejado"` (≤20% o WMO 0-1); compuesto `"Pega el sol"` / `"El sol castiga"` / `"El sol pega fuerte"` (despejado + `temp>28` + `sun_elevation>20` + `twilight=dia`), 33% c/u true-random (`loop_db.py:82-105`, `docs/motor_loop.md:154`).
+- **Variantes pesadas true-random**: viento `"Hay mucho viento"` 75% / `"Se nos vuelan las chapas"` 25%, lluvia `"Está lloviendo"` 90% / `"Se largó ya"` 10% (soez, 10%), calor `"Hace calor"` 90% / `"La calor que hace"` 10% (mal hablar, 10%) vía `random.choices` con `VARIANTES_CHICHES` (`loop_db.py:95`, `loop_engine.py:234` propaga `familia`).
+- **Geo-chiches**: ingresos/egresos a `provincia`/`departamento`/`municipio` (`"Entramos a X"` / `"Salimos de Y"`) detectados en **orden geográfico** `cumul_distance_m` (fallback `timestamp_utc`), no por hora, posicionados por `hora` con `lat/lon` y `ubicacion` del medio que marca el cambio (`loop_db.py:773-842`). Wire OSC 9002 extendido `/chiche <hora> <texto> [lat] [lon] [municipio] [provincia] [departamento]` → `fluir_chiches [hora,texto,lat,lon,municipio,provincia,departamento]` (`puente_td.py:1253`, `td/fluir_callbacks.dat:HEADER_CHICHES`, `td/crear_tablas_fluir.dat`).
+
+### Cambiado
+- **Umbrales**: `VIENTO_ALTO 30→40`, `PRECIP_LLUVIA 0→1.0` (`loop_db.py:82`); aunque 1.0 deje el viaje sin lluvia se mantiene honesto (a pedido).
+- **Sostenimiento ≥2**: familias `viento/lluvia/nublado/despejado/sol` solo se emiten tras 2 medios consecutivos con la condición (mitiga ruido horario Open-Meteo, `SOSTEN_MIN=2`, `FAMILIAS_SOSTENIDAS`, `loop_db.py:580`, dedup por `(familia, int(hora))`).
+- **Docs**: `docs/motor_loop.md:154` tabla v2.3 completa (11 familias, sostenido, geo, wire), `docs/diseno_instalacion.md:162` resumen v2.3, `docs/retorno_fluir_td.md` contrato 9002 y `fluir_chiches` 7 cols, `AGENTS.md` bullet chiches.
+
+### Verificado
+- `test_motor_loop` 47 ok, dry-run `7-16h` 1955 medios → 89-286 chiches (geo multiplica por ~70 municipios); `1.0mm` deja lluvia en 2/1955, `Se nos vuelan las chapas` 25% muestreado (271/1000) OK. `python -m py_compile` sobre 3 módulos OK.
+
 ## [Entrega 51] — 2026-08-29 — Deploy en dos modos (local completo / hosting) + limpieza TUI
 
 ### Añadido

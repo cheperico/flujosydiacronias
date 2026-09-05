@@ -225,12 +225,17 @@ def armar_spec(
         pos = posicionar_hora(float(hora), segmentos)
         if pos is None:
             continue
-        chiches_posicionados.append({
+        item = {
             "t": pos["t_loop"],
             "tipo": "chiche",
             "texto": chich.get("texto", ""),
-            "hora": float(hora),   # útil para reconfigurar en el navegador
-        })
+            "hora": float(hora),
+        }
+        # Campos opcionales geo (ubicar geográficamente el chiche)
+        for k in ("familia", "municipio", "provincia", "departamento", "lat", "lon", "ubicacion"):
+            if k in chich and chich[k] is not None:
+                item[k] = chich[k]
+        chiches_posicionados.append(item)
 
     return {
         "loop_secs": loop_secs,

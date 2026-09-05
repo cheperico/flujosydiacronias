@@ -1066,7 +1066,7 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
          tipo=text, justo después de su `/medio`, con el contenido completo
          (titulo_seccion + texto_completo) para que TD lo visualice (la ruta
          .md que viaja en `/medio` no sirve para mostrar el texto).
-      4. `/flujos/fluir/chiche <hora> <texto>` — uno por chiche ambiental.
+       4. `/flujos/fluir/chiche <hora> <texto> [lat] [lon] [municipio] [provincia] [departamento]` — uno por chiche ambiental (geo extendido, args extra opcionales para compat).
       5. `/flujos/fluir/mensaje <id> <from_name> <texto> <hora> <fecha> <tipo> <fotos> <municipio>`
          — uno por mensaje de Telegram del chat, SOLO si el visitante eligió
          municipio(s). Cada mensaje lleva su hora local (UTC-3) para que TD lo
@@ -1250,8 +1250,14 @@ Contrato de salida por 9002 (rediseño: el spec trae `por_tipo` y `resumen`):
             hora_chiche = chich.get("hora")
             if hora_chiche is None:
                 hora_chiche = chich.get("t", 0.0)
+            # Wire extendido: hora + texto + geo (compat: args extra opcionales)
             enviar(cli, f"{OSC_ADDR_FLUIR}/chiche",
-                   hora_chiche, chich.get("texto", ""))
+                   hora_chiche, chich.get("texto", ""),
+                   chich.get("lat") if chich.get("lat") is not None else "",
+                   chich.get("lon") if chich.get("lon") is not None else "",
+                   chich.get("municipio") or "",
+                   chich.get("provincia") or "",
+                   chich.get("departamento") or "")
 
     if enviar_telegram and mensajes_telegram:
         # Bloque del chat: /tabla telegram + un /mensaje por mensaje. El

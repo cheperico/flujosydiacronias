@@ -45,6 +45,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import sqlite3
 import sys
 from collections import Counter
@@ -79,10 +80,32 @@ import loop_engine  # noqa: E402
 MEDIODIA_UMBRAL_SEG = 900.0     # secs_since_noon ≈ 0 → ±15 min del cenit
 TEMP_CALOR = 30.0               # weather_temp_c > 30  → "Hace calor"
 TEMP_FRIO = 10.0                # weather_temp_c < 10  → "Hace frío"
-VIENTO_ALTO = 30.0              # weather_wind_speed_kmh > 30 → "Hay mucho viento"
-PRECIP_LLUVIA = 0.0             # weather_precip_mm > 0 → "Está lloviendo"
+TEMP_SOL = 28.0                 # temp para "Pega el sol" (despejado + calor)
+VIENTO_ALTO = 40.0              # weather_wind_speed_kmh > 40 → "Hay mucho viento"
+PRECIP_LLUVIA = 1.0             # weather_precip_mm > 1.0 → "Está lloviendo"
 ELEVACION_ALBA_BAJA = 0.0       # sun_elevation cruza 0° al alba
 ELEVACION_ALBA_ALTA = 3.0
+ELEVACION_SOL = 20.0            # sun_elevation mínima para "Pega el sol"
+NUBE_NUBLADO = 70.0             # weather_cloud_pct >=70 → "Está nublado"
+NUBE_DESPEJADO = 20.0           # weather_cloud_pct <=20 → "Cielo despejado"
+SOSTEN_MIN = 2                  # muestras consecutivas para mitigar Open-Meteo
+
+# Variantes con peso (true random). Familia -> (variantes, pesos).
+VARIANTES_CHICHES: dict[str, tuple[list[str], list[float]]] = {
+    "viento": (["Hay mucho viento", "Se nos vuelan las chapas"], [0.75, 0.25]),
+    "lluvia": (["Está lloviendo", "Se largó ya"], [0.90, 0.10]),
+    "calor": (["Hace calor", "La calor que hace"], [0.90, 0.10]),
+    "sol": (["Pega el sol", "El sol castiga", "El sol pega fuerte"], [1, 1, 1]),
+}
+
+
+def _elegir_variante(familia: str, fallback: str) -> str:
+    """Elige texto true-random con peso para familia, o fallback si no hay variantes."""
+    entry = VARIANTES_CHICHES.get(familia)
+    if not entry:
+        return fallback
+    variantes, pesos = entry
+    return random.choices(variantes, weights=pesos, k=1)[0]
 
 # Hora de día por defecto para textos sin timestamp (puntos curados).
 HORA_DEFECTO_TEXTO = 12.0
@@ -123,6 +146,8 @@ CLAVES_METADATA = [
     "weather_temp_c",
     "weather_wind_speed_kmh",
     "weather_precip_mm",
+    "weather_cloud_pct",
+    "weather_code",
     "weather_label",
 ]
 
@@ -284,7 +309,8 @@ def _filtrar_media(conn: sqlite3.Connection,
         SELECT m.id AS media_id, m.type AS tipo, m.subtype,
                m.filename_original, m.filepath_absoluto AS ruta,
                m.duration_secs, m.latitude AS lat, m.longitude AS lon,
-               m.municipio, m.color_1_name_basic AS color,
+               m.municipio, m.provincia, m.departamento,
+               m.color_1_name_basic AS color,
                m.color_2_name_basic AS color_2,
                m.color_3_name_basic AS color_3,
                m.author, m.cumul_distance_m, m.sun_elevation,
@@ -479,59 +505,81 @@ def _seleccionar(conn: sqlite3.Connection,
 # ── Chiches (eventos ambientales) ────────────────────────────────────────────
 
 
-def _chiches_de_medios(campos: dict) -> list[str]:
+def _chiches_de_medios(campos: dict) -> list[tuple[str, str]]:
     """
-    Evalúa las condiciones ambientales de un medio y devuelve los textos de
-    los chiches activos (docs/motor_loop.md §5).
+    Evalúa condiciones ambientales de un medio y devuelve chiches activos.
 
-    Los chiches salen EXCLUSIVAMENTE de condiciones climáticas y astronómicas
-    (weather_* + sun_*/twilight). No se mezcla ninguna otra fuente en ellos.
-
-    `campos` debe contener: sun_elevation, secs_since_noon, twilight_period,
-    weather_temp_c, weather_wind_speed_kmh, weather_precip_mm (float o None).
-
-    Args:
-        campos: dict con los campos calculados del medio.
-
-    Returns:
-        Lista de textos de chiches activos.
+    Retorna lista de (familia, texto). La familia es clave estable para
+    dedup/sostenimiento; el texto es la variante true-random con peso.
     """
-    textos: list[str] = []
+    pares: list[tuple[str, str]] = []
 
-    # "Salió el sol": sun_elevation cruza 0° al alba (elevación pequeña > 0)
     elev = campos.get("sun_elevation")
     if elev is not None and ELEVACION_ALBA_BAJA <= elev <= ELEVACION_ALBA_ALTA:
-        textos.append("Salió el sol")
+        pares.append(("alba", "Salió el sol"))
 
-    # "Es el mediodía": secs_since_noon ≈ 0
     ssn = campos.get("secs_since_noon")
     if ssn is not None and abs(ssn) <= MEDIODIA_UMBRAL_SEG:
-        textos.append("Es el mediodía")
+        pares.append(("mediodia", "Es el mediodía"))
 
-    # Térmico
     temp = campos.get("weather_temp_c")
     if temp is not None:
         if temp > TEMP_CALOR:
-            textos.append("Hace calor")
+            pares.append(("calor", _elegir_variante("calor", "Hace calor")))
         elif temp < TEMP_FRIO:
-            textos.append("Hace frío")
+            pares.append(("frio", "Hace frío"))
 
-    # Viento
+    # Se resuelven retrocompatibles via sostenimiento fuera; se mantienen aquí
+    # para casos sin sostenimiento (compat legacy: se filtran luego).
     viento = campos.get("weather_wind_speed_kmh")
     if viento is not None and viento > VIENTO_ALTO:
-        textos.append("Hay mucho viento")
+        pares.append(("viento", _elegir_variante("viento", "Hay mucho viento")))
 
-    # Lluvia
     precip = campos.get("weather_precip_mm")
     if precip is not None and precip > PRECIP_LLUVIA:
-        textos.append("Está lloviendo")
+        pares.append(("lluvia", _elegir_variante("lluvia", "Está lloviendo")))
 
-    # Noche
-    twi = campos.get("twilight_period") or ""
-    if twi in NOCHE_PERIODOS:
-        textos.append("Es la noche")
+    cloud = campos.get("weather_cloud_pct")
+    code = campos.get("weather_code")
+    # Nublado / despejado por cloud_pct, con fallback por WMO code
+    hay_nublado = False
+    hay_despejado = False
+    if cloud is not None:
+        if cloud >= NUBE_NUBLADO:
+            hay_nublado = True
+        elif cloud <= NUBE_DESPEJADO:
+            hay_despejado = True
+    if not hay_nublado and not hay_despejado and code is not None:
+        try:
+            ci = int(float(code))
+            if ci in (3,):
+                hay_nublado = True
+            elif ci in (0, 1):
+                hay_despejado = True
+        except (ValueError, TypeError):
+            pass
+    if hay_nublado:
+        pares.append(("nublado", "Está nublado"))
+    elif hay_despejado:
+        pares.append(("despejado", "Cielo despejado"))
 
-    return textos
+    # Sol fuerte: despejado + calor + elevación alta + día
+    if hay_despejado and temp is not None and temp > TEMP_SOL and elev is not None and elev > ELEVACION_SOL:
+        twi = campos.get("twilight_period") or ""
+        if twi == "dia" or not twi:
+            # si no hay twilight, igual considerar día si elev > 5
+            if twi == "dia" or elev > 5:
+                pares.append(("sol", _elegir_variante("sol", "Pega el sol")))
+
+    twi2 = campos.get("twilight_period") or ""
+    if twi2 in NOCHE_PERIODOS:
+        pares.append(("noche", "Es la noche"))
+
+    return pares
+
+
+# Familias que requieren sostenimiento (≥ SOSTEN_MIN consecutivos)
+FAMILIAS_SOSTENIDAS = {"viento", "lluvia", "nublado", "despejado", "sol"}
 
 
 # ── Generación del loop ──────────────────────────────────────────────────────
@@ -630,10 +678,10 @@ def generar_loop(
         # 3+4+5. Armar medios (con score) y chiches (consolidados).
         medios: list[dict] = []
         chiches: list[dict] = []
-        # Los chiches se consolidan por (texto, hora ENTERA) para no
-        # disparar un evento por cada medio: "Salió el sol" aparece una vez
-        # por hora de día, no 33 veces. Clave: texto + int(hora).
+        # Dedup por (familia, hora ENTERA) para no disparar por cada medio;
+        # sostenimiento ≥ SOSTEN_MIN para mitigar ruido horario Open-Meteo.
         chiches_vistos: set[tuple[str, int]] = set()
+        racha: dict[str, int] = {}
         for it in items:
             fila = it["fila"]
             hora = it["hora"]
@@ -645,14 +693,13 @@ def generar_loop(
             medio = {
                 "media_id": mid,
                 "tipo": fila["tipo"],
-                # Marca de video 360° (media.subtype = '360', escrito por
-                # improve_db --step video_metadata). Es ADITIVO al spec: el
-                # puente la usa para separar los videos 360 en la emisión OSC.
                 "es_360": fila["tipo"] == "video" and (fila["subtype"] == "360"),
                 "ruta": fila["ruta"],
                 "hora": hora,
                 "duracion": fila["duration_secs"] or 0.0,
                 "municipio": fila["municipio"],
+                "provincia": fila["provincia"],
+                "departamento": fila["departamento"],
                 "color": fila["color"],
                 "tags": _parse_tags(tags_text or meta.get("ia_keywords")),
                 "desc": (meta.get("texto_completo") or meta.get("ia_description", "")) if fila["tipo"] == "text" else meta.get("ia_description", ""),
@@ -664,13 +711,15 @@ def generar_loop(
                     "temp_c": _flotante(meta.get("weather_temp_c")),
                     "viento_kmh": _flotante(meta.get("weather_wind_speed_kmh")),
                     "precip_mm": _flotante(meta.get("weather_precip_mm")),
+                    "cloud_pct": _flotante(meta.get("weather_cloud_pct")),
+                    "code": _flotante(meta.get("weather_code")),
                     "etiqueta": meta.get("weather_label", ""),
                 },
                 "score": score,
             }
             medios.append(medio)
 
-            # Chiches ambientales (weather + astronomía únicamente).
+            # Chiches ambientales (weather + astronomía + geo)
             campos = {
                 "sun_elevation": fila["sun_elevation"],
                 "secs_since_noon": fila["secs_since_noon"],
@@ -678,13 +727,117 @@ def generar_loop(
                 "weather_temp_c": _flotante(meta.get("weather_temp_c")),
                 "weather_wind_speed_kmh": _flotante(meta.get("weather_wind_speed_kmh")),
                 "weather_precip_mm": _flotante(meta.get("weather_precip_mm")),
+                "weather_cloud_pct": _flotante(meta.get("weather_cloud_pct")),
+                "weather_code": meta.get("weather_code"),
             }
             hora_entera = int(hora)
-            for texto in _chiches_de_medios(campos):
-                clave = (texto, hora_entera)
-                if clave not in chiches_vistos:
-                    chiches_vistos.add(clave)
-                    chiches.append({"hora": hora, "texto": texto})
+            ubic = medio["ubicacion"]
+            # Pares (familia, texto) del medio actual
+            pares = _chiches_de_medios(campos)
+            familias_activas = {fam for fam, _ in pares}
+            # Actualizar rachas para familias sostenidas
+            for fam in FAMILIAS_SOSTENIDAS:
+                if fam in familias_activas:
+                    racha[fam] = racha.get(fam, 0) + 1
+                else:
+                    racha[fam] = 0
+
+            def _emitir(familia: str, texto: str) -> None:
+                clave = (familia, hora_entera)
+                if clave in chiches_vistos:
+                    return
+                chiches_vistos.add(clave)
+                chiches.append({
+                    "hora": hora,
+                    "texto": texto,
+                    "familia": familia,
+                    "ubicacion": ubic,
+                    "municipio": fila["municipio"],
+                    "provincia": fila["provincia"],
+                    "departamento": fila["departamento"],
+                    "lat": fila["lat"],
+                    "lon": fila["lon"],
+                })
+
+            for familia, texto in pares:
+                if familia in FAMILIAS_SOSTENIDAS:
+                    if racha.get(familia, 0) >= SOSTEN_MIN:
+                        _emitir(familia, texto)
+                else:
+                    _emitir(familia, texto)
+        # Geo chiches: ingresos/egresos provincia/departamento/municipio
+        # Se detectan en orden GEOGRÁFICO (cumul_distance_m) no en orden horario,
+        # para que el viaje BsAs→Tucumán no parezca zigzag por la hora del día.
+        # Se posicionan igual por hora (t_loop), pero el cambio se detecta por ruta.
+        def _orden_geo(it: dict) -> float:
+            cd = it["fila"]["cumul_distance_m"]
+            if cd is not None:
+                try:
+                    return float(cd)
+                except (TypeError, ValueError):
+                    pass
+            # fallback: timestamp_utc
+            ts = it["fila"]["timestamp_utc"]
+            dt = _parsear_timestamp(ts) if ts else None
+            if dt is not None:
+                return dt.timestamp()
+            return float(it["fila"]["media_id"] or 0)
+
+        items_geo = sorted(items, key=_orden_geo)
+        prev_provincia: Optional[str] = None
+        prev_departamento: Optional[str] = None
+        prev_municipio: Optional[str] = None
+        for it in items_geo:
+            fila = it["fila"]
+            hora = it["hora"]
+            hora_entera = int(hora)
+            ubic_geo = {"lat": fila["lat"], "lon": fila["lon"]} if fila["lat"] is not None else None
+            cur_prov = str(fila["provincia"] or "").strip() or None
+            cur_depto = str(fila["departamento"] or "").strip() or None
+            cur_muni = str(fila["municipio"] or "").strip() or None
+
+            def _geo_emit_geo(prev_val: Optional[str], cur_val: Optional[str], fam_pref: str):
+                if not cur_val or not cur_val.strip():
+                    return
+                cur_val = cur_val.strip()
+                if prev_val is None:
+                    texto = f"Entramos a {cur_val}"
+                    clave = (texto, hora_entera)
+                    if clave not in chiches_vistos:
+                        chiches_vistos.add(clave)
+                        chiches.append({
+                            "hora": hora, "texto": texto,
+                            "familia": f"{fam_pref}_entra",
+                            "ubicacion": ubic_geo,
+                            "municipio": fila["municipio"],
+                            "provincia": fila["provincia"],
+                            "departamento": fila["departamento"],
+                            "lat": fila["lat"], "lon": fila["lon"],
+                        })
+                elif cur_val != prev_val:
+                    for fam, txt in [(f"{fam_pref}_sale", f"Salimos de {prev_val}"),
+                                     (f"{fam_pref}_entra", f"Entramos a {cur_val}")]:
+                        clave2 = (txt, hora_entera)
+                        if clave2 not in chiches_vistos:
+                            chiches_vistos.add(clave2)
+                            chiches.append({
+                                "hora": hora, "texto": txt,
+                                "familia": fam,
+                                "ubicacion": ubic_geo,
+                                "municipio": fila["municipio"],
+                                "provincia": fila["provincia"],
+                                "departamento": fila["departamento"],
+                                "lat": fila["lat"], "lon": fila["lon"],
+                            })
+            _geo_emit_geo(prev_provincia, cur_prov, "provincia")
+            _geo_emit_geo(prev_departamento, cur_depto, "depto")
+            _geo_emit_geo(prev_municipio, cur_muni, "municipio")
+            if cur_prov:
+                prev_provincia = cur_prov
+            if cur_depto:
+                prev_departamento = cur_depto
+            if cur_muni:
+                prev_municipio = cur_muni
     finally:
         conn.close()
 
