@@ -35,6 +35,7 @@ from typing import Optional
 
 from scripts.ai_media.ollama_client import OllamaVision
 from scripts.ai_media.image_analysis import extraer_keywords, describir_imagen
+from scripts.ai_media.prompts import get_config, get_prompt
 from scripts.ai_media.proxy import obtener_proxy
 
 logger = logging.getLogger(__name__)
@@ -45,23 +46,29 @@ logger = logging.getLogger(__name__)
 # ~15x más rápido (~0.8s vs 3-13s por imagen) y suficiente para evaluar
 # calidad/tema. El FLUJO IA (improve_db, tag_images, etc.) NO se toca: sigue
 # con minicpm-v4.6 donde sí importa la calidad y el español.
+# Los prompts/modelos/temperaturas viven en prompts.yaml (grupo "seleccion").
 MODELO_SELECCION_DEFAULT = "moondream:latest"
 
-# moondream responde MAL a prompts en español (regurgita basura tipo "irtiville"),
-# así que los prompts de selección son en inglés y escuetos (rinde mejor así).
-PROMPT_EVALUAR_CALIDAD = (
-    "Evaluate this image's visual quality considering sharpness, "
-    "composition, lighting, color and interesting content. "
-    "Reply ONLY with a number 1-10 (10 = excellent) and a brief reason "
-    "of 10-15 words. Format: '8. Sharp, good composition, vibrant colors.'"
-)
+
+def _resolver_seleccion(
+    clave: str,
+    modelo: str | None,
+    temperatura: float | None,
+) -> tuple[str, float, str]:
+    """Resuelve (modelo, temperatura, texto) para una clave prompts.yaml."""
+    cfg = get_config(clave)
+    return (
+        modelo or cfg["modelo"],
+        cfg["temperatura"] if temperatura is None else temperatura,
+        cfg["texto"],
+    )
 
 def seleccionar_mejor_imagen(
     rutas_imagenes: list[str],
     criterio: str = "calidad",
-    modelo: str = MODELO_SELECCION_DEFAULT,
+    modelo: str | None = None,
     tema: Optional[str] = None,
-    temperatura: float = 0.2,
+    temperatura: float | None = None,
     usar_proxy: bool = True,
 ) -> dict:
     """
@@ -128,11 +135,13 @@ def seleccionar_mejor_imagen(
 
 def _seleccionar_por_calidad(
     rutas: list[str],
-    modelo: str,
-    temperatura: float,
+    modelo: str | None,
+    temperatura: float | None,
     usar_proxy: bool = True,
 ) -> dict:
     """Selecciona por calidad visual evaluada por el modelo."""
+    modelo, temperatura, prompt = _resolver_seleccion(
+        "seleccion.calidad", modelo, temperatura)
     cliente = OllamaVision(modelo=modelo)
     evaluaciones = []
 
@@ -141,7 +150,7 @@ def _seleccionar_por_calidad(
             ruta_ia = obtener_proxy(ruta, usar_proxy=usar_proxy)
             respuesta = cliente.analizar_imagen(
                 ruta_ia,
-                prompt=PROMPT_EVALUAR_CALIDAD,
+                prompt=prompt,
                 temperatura=temperatura,
             )
             # Parsear respuesta: "8.5. Buena composición..."
@@ -175,19 +184,17 @@ def _seleccionar_por_calidad(
 def _seleccionar_por_tema(
     rutas: list[str],
     tema: str,
-    modelo: str,
-    temperatura: float,
+    modelo: str | None,
+    temperatura: float | None,
     usar_proxy: bool = True,
 ) -> dict:
     """Selecciona la imagen que mejor coincide con un tema."""
+    modelo, temperatura, _ = _resolver_seleccion(
+        "seleccion.tema", modelo, temperatura)
     cliente = OllamaVision(modelo=modelo)
     evaluaciones = []
 
-    prompt_tema = (
-        f"Does this image match '{tema}'? Reply ONLY with a 1-10 score "
-        f"(10 = perfect match) and a brief reason. "
-        f"Format: '8. Matches: natural landscape with mountains and vegetation.'"
-    )
+    prompt_tema = get_prompt("seleccion.tema", tema=tema)
 
     for ruta in rutas:
         try:
@@ -388,7 +395,7 @@ def seleccionar_mejores_n(
     rutas_imagenes: list[str],
     n: int = 3,
     criterio: str = "calidad",
-    modelo: str = MODELO_SELECCION_DEFAULT,
+    modelo: str | None = None,
     tema: Optional[str] = None,
     usar_proxy: bool = True,
 ) -> list[dict]:
@@ -431,8 +438,8 @@ if __name__ == "__main__":
                         choices=["calidad", "tema", "diversidad", "descripcion", "nitidez"],
                         help="Criterio de selección (nitidez es computacional, sin IA)")
     parser.add_argument("--tema", help="Tema deseado (requerido si criterio=tema)")
-    parser.add_argument("--modelo", default=MODELO_SELECCION_DEFAULT,
-                        help=f"Modelo de visión (default: {MODELO_SELECCION_DEFAULT})")
+    parser.add_argument("--modelo", default=None,
+                        help="Modelo de visión (default: prompts.yaml seleccion.*)")
     parser.add_argument("--no-proxy", action="store_true",
                         help="No usar proxies redimensionados (más lento)")
     parser.add_argument("--n", type=int, default=1,

@@ -1,0 +1,243 @@
+# prompts.yaml — Prompts editables de los modelos de IA.
+#
+# CÓMO USAR ESTE ARCHIVO:
+#   - Cada entrada tiene 3 campos VIVOS (lo que el código realmente lee):
+#       modelo:      modelo de Ollama a usar (cambiarlo cambia la llamada).
+#       temperatura: creatividad 0.0–2.0 (cambiarla cambia la llamada).
+#       texto:       el prompt (bloque literal tras "texto: |-", respetar indentación;
+#                    sentido.* usa "texto: |" porque su salto final es parte del prompt).
+#   - Las líneas con "#" son solo comentarios para humanos: dónde se usa,
+#     con qué fue validado, estado y el DEFAULT ORIGINAL como backup.
+#   - Para recuperar un original, copiar el bloque "DEFAULT ORIGINAL" en "texto:".
+#   - Si el archivo falta o una clave está rota, el código usa el default
+#     embebido en prompts.py (DEFAULTS) y avisa con un warning: nada se rompe.
+#   - Placeholders entre {llaves} ({tema}, {kw}, {desc}): los sustituye el
+#     loader con .replace(). NO usar .format() ni agregar llaves literales
+#     sueltas en prompts con placeholders. Los ejemplos JSON llevan llaves
+#     simples naturales ({"tags": [...]}).
+#   - Requiere pyyaml (pip install pyyaml). Sin pyyaml se usan los defaults
+#     embebidos con un aviso.
+
+vision:
+  # ── vision.combinado (ACTIVO — el que más corre) ──
+  # Dónde se usa: improve_db --steps combinado/keywords/descriptions
+  #   → analizar_imagen_completo() → analyze_video.py (1 llamada por escena)
+  #   → tag_images.py.
+  # Validado con: minicpm-v4.6:latest. NO usar moondream (no da JSON estructurado).
+  # Placeholders: ninguno. Las llaves del ejemplo JSON son literales, no tocarlas.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Respond with ONLY JSON about THIS image with two fields:
+  #   1. "keywords": exactly 5 keywords comma-separated, describing ONLY the content of THIS image.
+  #   2. "description": a long description of THIS image, written directly without preamble or meta-commentary.
+  #   Exact format: {"keywords": ["sofa", "bookshelf", "lamp", "carpet", "window"], "description": "Long description text here."}
+  #   The JSON format above is just an example; its keywords are NOT part of this image. List keywords only from what YOU see in THIS image.
+  #   Nothing else but the JSON.
+  combinado:
+    modelo: "minicpm-v4.6:latest"
+    temperatura: 0.2
+    texto: |-
+      Respond with ONLY JSON about THIS image with two fields:
+      1. "keywords": exactly 5 keywords comma-separated, describing ONLY the content of THIS image.
+      2. "description": a long description of THIS image, written directly without preamble or meta-commentary.
+      Exact format: {"keywords": ["sofa", "bookshelf", "lamp", "carpet", "window"], "description": "Long description text here."}
+      The JSON format above is just an example; its keywords are NOT part of this image. List keywords only from what YOU see in THIS image.
+      Nothing else but the JSON.
+
+  # ── vision.keywords_solo (STANDALONE) ──
+  # Dónde se usa: image_analysis.py --action keywords → extraer_keywords().
+  #   El pipeline usa 'combinado', no este.
+  # Validado con: minicpm-v4.6:latest. Idioma: INGLÉS a propósito.
+  # Placeholders: ninguno.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Give me exactly 5 keywords for this image, comma-separated.
+  keywords_solo:
+    modelo: "minicpm-v4.6:latest"
+    temperatura: 0.2
+    texto: |-
+      Give me exactly 5 keywords for this image, comma-separated.
+
+  # ── vision.describir_solo (STANDALONE) ──
+  # Dónde se usa: image_analysis.py --action describir → describir_imagen().
+  #   El pipeline usa 'combinado', no este.
+  # Validado con: minicpm-v4.6:latest. Sin "Give me" (evita eco de meta-intro);
+  #   limpiar_meta_intro() sigue como red de seguridad.
+  # Placeholders: ninguno.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Describe what you see in this image in detail. Start directly with the scene, without any preamble.
+  describir_solo:
+    modelo: "minicpm-v4.6:latest"
+    temperatura: 0.3
+    texto: |-
+      Describe what you see in this image in detail. Start directly with the scene, without any preamble.
+
+  # ── vision.clasificar (STANDALONE) ──
+  # Dónde se usa: image_analysis.py --action clasificar → clasificar_imagen().
+  #   El género fotográfico está descartado del pipeline; solo uso manual.
+  # Validado con: minicpm-v4.6:latest.
+  # Placeholders: ninguno.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Clasificá esta imagen en una de estas categorías: naturaleza, urbano, retrato, abstracto, documento, evento, paisaje, arquitectura, objeto, arte, comida, tecnología, deporte, noche, macro, otras. Respondé solo con el nombre de la categoría.
+  clasificar:
+    modelo: "minicpm-v4.6:latest"
+    temperatura: 0.1
+    texto: |-
+      Clasificá esta imagen en una de estas categorías: naturaleza, urbano, retrato, abstracto, documento, evento, paisaje, arquitectura, objeto, arte, comida, tecnología, deporte, noche, macro, otras. Respondé solo con el nombre de la categoría.
+
+sentido:
+  # ── sentido.transcripcion (ACTIVO) ──
+  # Dónde se usa: improve_db --steps kw_transcripcion → keywords_transcripciones.py
+  #   --origen transcripcion (audios/videos con whisper_segments) → ia_keywords_transcripcion.
+  # Validado con: gemma3:latest (ganó A/B contra qwen2.5:3b).
+  # El texto fuente se CONCATENA al final (prompt + texto), no hay placeholders.
+  #   No agregar llaves sueltas: el ejemplo {"tags": [...]} es literal.
+  # DEFAULT ORIGINAL (backup para recuperar): ver prompts.py DEFAULTS["sentido.transcripcion"].
+  transcripcion:
+    modelo: "gemma3:latest"
+    temperatura: 0.2
+    texto: |
+      Analizá la transcripción y extraé las keywords del SENTIDO de lo que se dice (de qué trata realmente, no de las palabras sueltas).
+      Reglas OBLIGATORIAS:
+      1. Formato: SOLO un objeto JSON válido con exactamente 5 keywords en ESPAÑOL: {"tags": ["a", "b", "c", "d", "e"]}. Sin texto adicional. El ejemplo es solo formato; sus tags NO pertenecen a este texto.
+      2. Las keywords salen del SIGNIFICADO: temas, lugares, actividades, personas, emociones, clima, objetos, transporte, comida, sensaciones.
+      3. PROHIBIDO palabras vacías o muletillas: bien, buen, buena, bueno, finalmente, falta, tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo tema central).
+      4. NO copies errores de transcripción: si una palabra es artefacto de voz, ignorala.
+      5. Sé FIEL: no agregues interpretaciones que el texto no sostenga (si se ayudaron → 'solidaridad', nunca 'sociedad individualista').
+      6. Escribí bien las compuestas: respetá género y número.
+      7. Preferí palabras de contenido concreto antes que adverbios o adjetivos genéricos.
+
+      Transcripción:
+
+  # ── sentido.texto (ACTIVO) ──
+  # Dónde se usa: improve_db --steps kw_texto → keywords_transcripciones.py
+  #   --origen texto (media type='text' con texto_completo) → ia_keywords_texto.
+  # Validado con: gemma3:latest. Mismas reglas que transcripcion, cambia el encabezado.
+  # El texto fuente se CONCATENA al final (prompt + texto), no hay placeholders.
+  # DEFAULT ORIGINAL (backup para recuperar): ver prompts.py DEFAULTS["sentido.texto"].
+  texto:
+    modelo: "gemma3:latest"
+    temperatura: 0.2
+    texto: |
+      Analizá este **texto** y extraé las keywords del SENTIDO de lo que se dice (de qué trata realmente, no de las palabras sueltas).
+      Reglas OBLIGATORIAS:
+      1. Formato: SOLO un objeto JSON válido con exactamente 5 keywords en ESPAÑOL: {"tags": ["a", "b", "c", "d", "e"]}. Sin texto adicional. El ejemplo es solo formato; sus tags NO pertenecen a este texto.
+      2. Las keywords salen del SIGNIFICADO: temas, lugares, actividades, personas, emociones, clima, objetos, transporte, comida, sensaciones.
+      3. PROHIBIDO palabras vacías o muletillas: bien, buen, buena, bueno, finalmente, falta, tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo tema central).
+      4. NO copies errores de transcripción: si una palabra es artefacto de voz, ignorala.
+      5. Sé FIEL: no agregues interpretaciones que el texto no sostenga (si se ayudaron → 'solidaridad', nunca 'sociedad individualista').
+      6. Escribí bien las compuestas: respetá género y número.
+      7. Preferí palabras de contenido concreto antes que adverbios o adjetivos genéricos.
+
+      Texto:
+
+seleccion:
+  # ── seleccion.calidad (ACTIVO) ──
+  # Dónde se usa: limpiar_tandas.py → batch_selector criterio="calidad".
+  # Validado con: moondream:latest (rápido; moondream rinde mejor en INGLÉS escueto).
+  # Placeholders: ninguno.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Evaluate this image's visual quality considering sharpness, composition, lighting, color and interesting content. Reply ONLY with a number 1-10 (10 = excellent) and a brief reason of 10-15 words. Format: '8. Sharp, good composition, vibrant colors.'
+  calidad:
+    modelo: "moondream:latest"
+    temperatura: 0.2
+    texto: |-
+      Evaluate this image's visual quality considering sharpness, composition, lighting, color and interesting content. Reply ONLY with a number 1-10 (10 = excellent) and a brief reason of 10-15 words. Format: '8. Sharp, good composition, vibrant colors.'
+
+  # ── seleccion.tema (ACTIVO) ──
+  # Dónde se usa: limpiar_tandas.py → batch_selector criterio="tema".
+  # Validado con: moondream:latest.
+  # Placeholder: {tema} (el loader lo sustituye; el tema va entre comillas simples).
+  #   Cuidado: si el tema trae comillas o saltos de línea, se sanitiza en el loader.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Does this image match '{tema}'? Reply ONLY with a 1-10 score (10 = perfect match) and a brief reason. Format: '8. Matches: natural landscape with mountains and vegetation.'
+  tema:
+    modelo: "moondream:latest"
+    temperatura: 0.2
+    texto: |-
+      Does this image match '{tema}'? Reply ONLY with a 1-10 score (10 = perfect match) and a brief reason. Format: '8. Matches: natural landscape with mountains and vegetation.'
+
+clustering:
+  # ── clustering.tags (ACTIVO) ──
+  # Dónde se usa: limpiar_tandas.py → clustering.agrupar_por_tags().
+  # Validado con: moondream:latest, prompts EN (moondream responde mal en español).
+  # Placeholders: ninguno.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Reply with ONLY 3 comma-separated keywords describing the main content of this image. Example: 'sunset, plaza, bicycles'
+  tags:
+    modelo: "moondream:latest"
+    temperatura: 0.1
+    texto: |-
+      Reply with ONLY 3 comma-separated keywords describing the main content of this image. Example: 'sunset, plaza, bicycles'
+
+  # ── clustering.desc (ACTIVO) ──
+  # Dónde se usa: limpiar_tandas.py → clustering.agrupar_por_embeddings()
+  #   (descripción breve → embedding nomic-embed-text → cosine similarity).
+  # Validado con: moondream:latest.
+  # Placeholders: ninguno.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Briefly describe what is seen in this image in one sentence of at most 15 words. Avoid judgments, only describe content.
+  desc:
+    modelo: "moondream:latest"
+    temperatura: 0.1
+    texto: |-
+      Briefly describe what is seen in this image in one sentence of at most 15 words. Avoid judgments, only describe content.
+
+traduccion:
+  # ── traduccion.ambos (LEGACY) ──
+  # Dónde se usa: SOLO con --motor ollama (translategemma), paso "ambos".
+  #   El default del pipeline es NO-AI (google/argos/glosario, sin prompt):
+  #   editar esto NO tiene efecto salvo que se pase --motor ollama.
+  # Placeholders: {kw} (keywords EN coma-separadas), {desc} (descripción EN).
+  #   Las llaves del ejemplo JSON son simples y naturales; el loader sustituye
+  #   solo {kw} y {desc} con .replace().
+  # DEFAULT ORIGINAL (backup para recuperar): ver prompts.py DEFAULTS["traduccion.ambos"].
+  ambos:
+    modelo: "translategemma"
+    temperatura: 0.1
+    texto: |-
+      Traducí al ESPAÑOL rioplatense (Argentina) los siguientes datos de una imagen.
+      Reglas:
+      1. Keywords: SUSTANTIVOS, en el mismo orden, separadas por comas.
+      2. NO dejes palabras en inglés, traducí TODAS.
+      3. NO es portugués: en español se dice 'persona', 'objeto', 'color', 'acción'.
+      4. Descripción: traducción natural y completa.
+      Respondé SOLO con JSON: {"keywords": "palabras en español separadas por comas", "description": "descripción en español"}
+
+      Keywords EN: {kw}
+      Descripción EN: {desc}
+
+  # ── traduccion.keywords (LEGACY) ──
+  # Dónde se usa: SOLO con --motor ollama, paso "keywords".
+  #   Default del pipeline: NO-AI (sin prompt). Ver nota en traduccion.ambos.
+  # Placeholder: {kw}.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Traducí estas palabras clave del inglés al ESPAÑOL rioplatense (Argentina). [...] Palabras en inglés: {kw}
+  keywords:
+    modelo: "translategemma"
+    temperatura: 0.1
+    texto: |-
+      Traducí estas palabras clave del inglés al ESPAÑOL rioplatense (Argentina).
+      Reglas:
+      1. Devolvé SOLO las palabras en español, separadas por comas, en el mismo orden.
+      2. Las palabras deben ser SUSTANTIVOS (no verbos ni frases verbales).
+      3. NO dejes ninguna palabra en inglés, traducí TODAS.
+      4. NO es portugués: recordá que en español se dice 'persona', 'objeto', 'color', 'acción'.
+
+      Palabras en inglés: {kw}
+
+  # ── traduccion.descripcion (LEGACY) ──
+  # Dónde se usa: SOLO con --motor ollama, paso "descriptions".
+  #   Default del pipeline: NO-AI (sin prompt). Ver nota en traduccion.ambos.
+  # Placeholder: {desc}.
+  # DEFAULT ORIGINAL (backup para recuperar):
+  #   Traducí este texto del inglés al ESPAÑOL rioplatense (Argentina). [...] Texto en inglés: {desc}
+  descripcion:
+    modelo: "translategemma"
+    temperatura: 0.1
+    texto: |-
+      Traducí este texto del inglés al ESPAÑOL rioplatense (Argentina).
+      Reglas:
+      1. Devolvé SOLO la traducción, sin comentarios.
+      2. NO es portugués: en español se dice 'persona', 'objeto', 'imagen', 'acción'.
+      3. Mantené el tono natural del español.
+
+      Texto en inglés: {desc}

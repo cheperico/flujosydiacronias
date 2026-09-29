@@ -67,6 +67,7 @@ referenciados en **Dónde está la información** (al final) — consultar bajo 
 │   │   │   batch_selector.py, clustering.py, generate_embeddings.py, refinar_keywords.py,
 │   │   │   keywords_transcripciones.py, audio_tagging.py, checkpoint.py, proxy.py,
 │   │   │   glosario.py, generar_glosario.py, generar_sinonimos_localidades.py
+│   │   ├── prompts.yaml, prompts.py   # Prompts editables + loader (ver catálogo)
 │   │   └── loop_engine.py, loop_db.py, test_motor_loop.py
 │   └── td/
 │       └── puente_td.py, elecciones.py, osc_probe.py, util_enter.py
@@ -218,6 +219,8 @@ Detalle de args CLI de cada script en su **docstring** (o `python script.py --he
 | `consolidar_medios.py` | Consolida medios de múltiples raíces absolutas en una estructura unificada (copiar/mover + actualizar DB + `ingest_root`) | Standalone: `python scripts/consolidar_medios.py --new-root <carpeta> [--mode mover\|copiar]` |
 | `mover_descartadas.py` | Mueve imágenes descartadas a la carpeta `excluir/` (post-limpieza de tandas) | Usado por `limpiar_tandas` |
 | `ai_media/ollama_client.py` | Cliente Ollama compartido (visión/texto/embeddings) + auto-inicio `asegurar_ollama()` | Usado por todos los scripts IA |
+| `ai_media/prompts.yaml` | **Prompts editables** (13: visión 4, sentido 2, selección 2, clustering 2, traducción legacy 3). Cada entrada: `modelo` + `temperatura` + `texto` vivos; comentarios con dónde se usa, modelo validado y DEFAULT ORIGINAL backup | Editar acá para probar prompts; ver con `python scripts/ai_media/prompts.py [--clave X]` |
+| `ai_media/prompts.py` | Loader (`get_config`/`get_prompt`/`listar_prompts`): cache, fallback a DEFAULTS embebidos + warning, `FLUIR_PROMPTS_STRICT=1` para CI | Usado por los 5 scripts IA (explícito/CLI > YAML > DEFAULTS) |
 | `ai_media/image_analysis.py` | Keywords + descripción de imágenes (visión minicpm, prompts EN) | Usado por `improve_db --step keywords/descriptions` |
 | `ai_media/transcribe.py` / `transcribe_media.py` | Transcripción faster-whisper (independiente / desde DB) | `transcribe.py` usado por `--step transcribe` (importa `transcribir_audio`/`clasificar_estado`); `transcribe_media.py` standalone |
 | `ai_media/traducir_metadata.py` | Traduce EN→ES sobre la DB (re-ejecutable sin re-correr visión); **NO-AI** por defecto — glosario + motor clásico (`--motor google` default vía `deep_translator`, `argos` offline, `glosario` solo léxico; `--motor ollama` = legacy translategemma) | Standalone: `python scripts/ai_media/traducir_metadata.py --paso keywords --mode update` |

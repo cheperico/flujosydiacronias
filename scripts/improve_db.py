@@ -288,8 +288,6 @@ def _procesar_vision(conn, mode, stats, nombre, fn_vision, clave_en, clave_es,
     """
     log.info("  [Fase A] Visión (EN) -> %s", clave_en)
 
-    from scripts.ai_media.image_analysis import MODELO_VISION_DEFAULT
-
     helper = ModoHelper(mode)
 
     # replace: limpiar BOTH claves (EN y ES) — la fase B retraducirá todo
@@ -323,7 +321,7 @@ def _procesar_vision(conn, mode, stats, nombre, fn_vision, clave_en, clave_es,
         if not os.path.isfile(fpath):
             return "warning", fpath
         try:
-            dato = fn_vision(fpath, modelo=MODELO_VISION_DEFAULT)
+            dato = fn_vision(fpath)
             return "ok", (mid, dato)
         except Exception as e:
             return "error", (fpath, e)
@@ -432,7 +430,7 @@ def _procesar_vision(conn, mode, stats, nombre, fn_vision, clave_en, clave_es,
 
 
 def _traducir_metadata(conn, mode, stats, nombre, clave_en, clave_es, paso,
-                       modelo_traduccion="translategemma", motor="google"):
+                       modelo_traduccion=None, motor="google"):
     """
     Fase B de keywords/descriptions: traduce EN -> ES sobre la DB.
 
@@ -737,14 +735,13 @@ def run_combinado(conn, db_path, mode, stats, motor="google"):
         log.info("  No hay imágenes pendientes (visión combinada).")
         return
 
-    from scripts.ai_media.image_analysis import MODELO_VISION_DEFAULT
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     def _process_one(mid, fpath):
         if not os.path.isfile(fpath):
             return "warning", fpath
         try:
-            res = analizar_imagen_completo(fpath, modelo=MODELO_VISION_DEFAULT)
+            res = analizar_imagen_completo(fpath)
             return "ok", (mid, res)
         except Exception as e:
             return "error", (fpath, e)

@@ -32,10 +32,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.ai_media.image_analysis import extraer_keywords
-from scripts.ai_media.batch_selector import (
-    seleccionar_mejor_imagen,
-    MODELO_SELECCION_DEFAULT,
-)
+from scripts.ai_media.batch_selector import seleccionar_mejor_imagen
 from scripts.ai_media.proxy import (
     obtener_proxy,
     limpiar_proxies,
@@ -45,7 +42,6 @@ from scripts.ai_media.proxy import (
 from scripts.ai_media.clustering import (
     agrupar_por_tags,
     agrupar_por_embeddings,
-    MODELO_CLUSTERING_DEFAULT,
 )
 
 logger = logging.getLogger(__name__)
@@ -323,8 +319,8 @@ def limpiar_tandas(
     umbral_hamming: int = 5,
     umbral_tiempo_segundos: int = 30,
     criterio: str = "calidad",
-    modelo: str = MODELO_SELECCION_DEFAULT,
-    modelo_clustering: str = MODELO_CLUSTERING_DEFAULT,
+    modelo: str | None = None,
+    modelo_clustering: str | None = None,
     modelo_embed: str = "nomic-embed-text",
     usar_proxy: bool = True,
     usar_similitud: bool = True,
@@ -377,6 +373,9 @@ def limpiar_tandas(
     Returns:
         Dict con estadísticas del proceso.
     """
+    # NOTE: modelo/modelo_clustering None fluyen hacia abajo y cada helper
+    # resuelve su propia clave prompts.yaml (seleccion.*/clustering.*).
+    # Solo el reporte final muestra los valores efectivos.
     carpeta = Path(carpeta)
     if not carpeta.exists():
         raise FileNotFoundError(f"La carpeta no existe: {carpeta}")
@@ -475,11 +474,11 @@ def limpiar_tandas(
 
         try:
             # Seleccionar mejor imagen con batch_selector
+            # (modelo/temp de prompts.yaml seleccion.* salvo override explícito)
             mejor = seleccionar_mejor_imagen(
                 grupo,
                 criterio=criterio,
                 modelo=modelo,
-                temperatura=0.2,
                 usar_proxy=usar_proxy,
             )
             ruta_mejor = mejor["ruta"]
@@ -511,7 +510,8 @@ def limpiar_tandas(
     if limpiar_proxies_al_final and not dry_run:
         limpiar_todos_los_proxies(str(carpeta))
 
-    # Reporte final
+    # Reporte final (modelos efectivos para trazabilidad)
+    from scripts.ai_media.prompts import get_config
     reporte = {
         "carpeta": str(carpeta),
         "ventana_minutos": ventana_minutos,
@@ -530,8 +530,8 @@ def limpiar_tandas(
         "dry_run": dry_run,
         "criterio": criterio,
         "criterio_agrupacion": ("ninguno" if not usar_similitud else criterio_agrupacion),
-        "modelo": modelo,
-        "modelo_clustering": modelo_clustering,
+        "modelo": modelo or get_config("seleccion.calidad")["modelo"],
+        "modelo_clustering": modelo_clustering or get_config("clustering.tags")["modelo"],
         "modelo_embed": modelo_embed,
     }
 
@@ -669,12 +669,12 @@ def main(argv: list[str] | None = None) -> None:
                         choices=["calidad", "tema", "diversidad", "descripcion", "nitidez"],
                         help="Criterio de selección (default: calidad). "
                              "nitidez = varianza Laplaciano, SIN IA (instantáneo)")
-    parser.add_argument("--modelo", default=MODELO_SELECCION_DEFAULT,
-                        help=f"Modelo de visión para SELECCIONAR la mejor imagen "
-                             f"(default: {MODELO_SELECCION_DEFAULT}, rápido; limpieza es solo curación)")
-    parser.add_argument("--modelo-clustering", default=MODELO_CLUSTERING_DEFAULT,
-                        help=f"Modelo de visión para AGRUPAR (embeddings/tags) "
-                             f"(default: {MODELO_CLUSTERING_DEFAULT}, rápido)")
+    parser.add_argument("--modelo", default=None,
+                        help="Modelo de visión para SELECCIONAR la mejor imagen "
+                             "(default: prompts.yaml seleccion.*; limpieza es solo curación)")
+    parser.add_argument("--modelo-clustering", default=None,
+                        help="Modelo de visión para AGRUPAR (embeddings/tags) "
+                             "(default: prompts.yaml clustering.*)")
     parser.add_argument("--modelo-embed", default="nomic-embed-text",
                         help="Modelo de embeddings para --criterio-agrupacion=embeddings "
                              "(default: nomic-embed-text)")

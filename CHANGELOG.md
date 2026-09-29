@@ -7,6 +7,21 @@ Las versiones corresponden a entregas funcionales, no a releases semánticas.
 
 ---
 
+## [Entrega 54] — 2026-09-29 — Prompts IA centralizados en YAML editable
+
+### Añadido
+- **Prompts editables** (`scripts/ai_media/prompts.yaml` + `scripts/ai_media/prompts.py`): los 13 prompts de IA (visión 4, sentido 2, selección 2, clustering 2, traducción legacy 3) viven en un YAML con comentarios de dónde se usa cada uno, con qué modelo fue validado y el DEFAULT ORIGINAL como backup. Cada entrada expone `modelo`, `temperatura` y `texto` editables. Loader con cache, fallback a defaults embebidos si el YAML falta o una clave está rota (warning, nunca rompe el pipeline) y `FLUIR_PROMPTS_STRICT=1` para fallar fuerte en CI. Placeholders `{tema}`/`{kw}`/`{desc}` por `.replace()` (nunca `.format`, hay llaves JSON literales). Ver con `python scripts/ai_media/prompts.py [--clave X]`.
+- Precedencia: argumento explícito/CLI > YAML > defaults embebidos. `--modelo` de los CLIs ahora default `None` (resuelve YAML); pasar `--modelo` sigue ganando.
+
+### Cambiado
+- `image_analysis.py`, `batch_selector.py`, `clustering.py`, `keywords_transcripciones.py`, `traducir_metadata.py`: prompts, modelos y temperaturas se resuelven vía `prompts.get_config()`; constantes `PROMPT_*` eliminadas (los `MODELO_*_DEFAULT` quedan como referencia/compatibilidad).
+- Callers (`improve_db.py`, `analyze_video.py`, `tag_images.py`, `limpiar_tandas.py`): dejan de forzar `modelo=MODELO_*_DEFAULT` explícito para que el YAML fluya (`None` = YAML); temperaturas explícitas por escena (0.1 en video) se conservan.
+- `AGENTS.md`: catálogo + estructura con `prompts.yaml`/`prompts.py`.
+
+### Verificado
+- Neutralidad byte-exacta YAML-vs-defaults (13/13 OK); sustitución `{tema}`/`{kw,desc}` OK; fallback con entrada rota OK; strict OK; `py_compile` 10 módulos OK; imports OK.
+- Revisión post-implementación: ejecución directa (`python scripts/ai_media/keywords_transcripciones.py --help`, `traducir_metadata.py`, `analyze_video.py`) OK vía carga de `prompts.py` por ruta (evita el `__init__` pesado de `ai_media` y el nombre `scripts` cacheado); warnings nuevos ante placeholder faltante y clave con typo en el YAML; docstrings de `analyze_video.py` apuntan a `prompts.yaml`.
+
 ## [Entrega 53] — 2026-09-05 — Mapa unificado offline/online con clusters multicolor y expansión de transcripción
 
 ### Añadido

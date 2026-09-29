@@ -59,9 +59,27 @@ import sqlite3
 import sys
 import time
 
+try:
+    from scripts.ai_media.prompts import get_config, get_prompt
+except ImportError:
+    # Ejecución directa como script (python scripts/ai_media/x.py):
+    # cargar prompts.py por ruta de archivo, sin pasar por el paquete
+    # `scripts` (su __init__ arrastra dependencias pesadas y el nombre
+    # puede venir cacheado de otro lado en sys.modules).
+    import importlib.util
+    _PROMPTS_PATH = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "prompts.py")
+    _spec = importlib.util.spec_from_file_location("flujos_prompts", _PROMPTS_PATH)
+    _modulo_prompts = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_modulo_prompts)
+    get_config = _modulo_prompts.get_config
+    get_prompt = _modulo_prompts.get_prompt
+
 log = logging.getLogger(__name__)
 
 # ── Modelo de texto para traducción ──────────────────────────────────────────
+# Default efectivo en prompts.yaml (traduccion.*). Solo se usa con
+# --motor ollama (legacy); el default del pipeline es NO-AI (sin prompt).
 MODELO_TRADUCCION_DEFAULT = "translategemma"
 
 # ── Claves en DB ─────────────────────────────────────────────────────────────
@@ -70,40 +88,9 @@ CLAVE_DESC_EN = "ia_description_en"
 CLAVE_KW_ES = "ia_keywords"
 CLAVE_DESC_ES = "ia_description"
 
-# ── Prompts de traducción ────────────────────────────────────────────────────
-
-PROMPT_TRADUCIR_AMBOS = (
-    "Traducí al ESPAÑOL rioplatense (Argentina) los siguientes datos de una imagen.\n"
-    "Reglas:\n"
-    "1. Keywords: SUSTANTIVOS, en el mismo orden, separadas por comas.\n"
-    "2. NO dejes palabras en inglés, traducí TODAS.\n"
-    "3. NO es portugués: en español se dice 'persona', 'objeto', 'color', 'acción'.\n"
-    "4. Descripción: traducción natural y completa.\n"
-    'Respondé SOLO con JSON: {{"keywords": "palabras en español separadas por comas", '
-    '"description": "descripción en español"}}\n\n'
-    "Keywords EN: {kw}\n"
-    "Descripción EN: {desc}"
-)
-
-PROMPT_TRADUCIR_KEYWORDS = (
-    "Traducí estas palabras clave del inglés al ESPAÑOL rioplatense (Argentina).\n"
-    "Reglas:\n"
-    "1. Devolvé SOLO las palabras en español, separadas por comas, en el mismo orden.\n"
-    "2. Las palabras deben ser SUSTANTIVOS (no verbos ni frases verbales).\n"
-    "3. NO dejes ninguna palabra en inglés, traducí TODAS.\n"
-    "4. NO es portugués: recordá que en español se dice 'persona', 'objeto', 'color', 'acción'.\n"
-    "\n"
-    "Palabras en inglés: {kw}"
-)
-
-PROMPT_TRADUCIR_DESCRIPCION = (
-    "Traducí este texto del inglés al ESPAÑOL rioplatense (Argentina).\n"
-    "Reglas:\n"
-    "1. Devolvé SOLO la traducción, sin comentarios.\n"
-    "2. NO es portugués: en español se dice 'persona', 'objeto', 'imagen', 'acción'.\n"
-    "3. Mantené el tono natural del español.\n\n"
-    "Texto en inglés: {desc}"
-)
+# ── Prompts de traducción (editables en prompts.yaml, grupo "traduccion") ───
+# Solo pipeline legacy (--motor ollama). Se resuelven en vivo en
+# traducir_llamada() (argumento explícito > YAML > DEFAULTS en prompts.py).
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -163,7 +150,7 @@ def traducir_llamada(
     kw_en: list[str],
     desc_en: str,
     paso: str,
-    modelo: str,
+    modelo: str | None,
 ) -> tuple[list[str], str, str]:
     """
     Hace UNA llamada al modelo de texto y devuelve (keywords_es, descripcion_es, prompt_usado).
@@ -173,7 +160,7 @@ def traducir_llamada(
         kw_en: keywords en inglés (lista)
         desc_en: descripción en inglés (string)
         paso: 'keywords' | 'descriptions' | 'ambos'
-        modelo: modelo de texto
+        modelo: modelo de texto (None = prompts.yaml traduccion.*)
 
     Returns:
         (keywords_es, descripcion_es, prompt) — uno de los dos puede ser None.
@@ -182,11 +169,12 @@ def traducir_llamada(
     desc_str = desc_en.strip() if desc_en else ""
 
     if paso == "keywords" or (paso == "ambos" and not desc_str):
-        prompt = PROMPT_TRADUCIR_KEYWORDS.format(kw=kw_str)
+        cfg = get_config("traduccion.keywords")
+        prompt = get_prompt("traduccion.keywords", kw=kw_str)
         respuesta = cliente.chat(
-            model=modelo,
+            model=modelo or cfg["modelo"],
             messages=[{"role": "user", "content": prompt}],
-            options={"num_ctx": 1024, "temperature": 0.1},
+            options={"num_ctx": 1024, "temperature": cfg["temperatura"]},
         ).message.content.strip()
         # La respuesta es "palabras, separadas, por, comas"
         partes = [p.strip().strip("'\"") for p in respuesta.split(",") if p.strip()]
@@ -194,20 +182,22 @@ def traducir_llamada(
         return (partes or None, None, "keywords")
 
     if paso == "descriptions" or (paso == "ambos" and not kw_str):
-        prompt = PROMPT_TRADUCIR_DESCRIPCION.format(desc=desc_str)
+        cfg = get_config("traduccion.descripcion")
+        prompt = get_prompt("traduccion.descripcion", desc=desc_str)
         respuesta = cliente.chat(
-            model=modelo,
+            model=modelo or cfg["modelo"],
             messages=[{"role": "user", "content": prompt}],
-            options={"num_ctx": 2048, "temperature": 0.1},
+            options={"num_ctx": 2048, "temperature": cfg["temperatura"]},
         ).message.content.strip()
         return (None, respuesta or None, "descriptions")
 
     # ambos: una llamada JSON
-    prompt = PROMPT_TRADUCIR_AMBOS.format(kw=kw_str, desc=desc_str)
+    cfg = get_config("traduccion.ambos")
+    prompt = get_prompt("traduccion.ambos", kw=kw_str, desc=desc_str)
     respuesta = cliente.chat(
-        model=modelo,
+        model=modelo or cfg["modelo"],
         messages=[{"role": "user", "content": prompt}],
-        options={"num_ctx": 2048, "temperature": 0.1},
+        options={"num_ctx": 2048, "temperature": cfg["temperatura"]},
     ).message.content.strip()
 
     datos = reparar_json(respuesta)
@@ -239,8 +229,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--db", default=None, help="Ruta a la base de datos (default: db/flujos.db)")
     parser.add_argument("--paso", default="ambos", choices=["keywords", "descriptions", "ambos"],
                         help="Qué traducir (default: ambos)")
-    parser.add_argument("--modelo", default=MODELO_TRADUCCION_DEFAULT,
-                        help=f"Modelo de texto para traducción ollama (default: {MODELO_TRADUCCION_DEFAULT})")
+    parser.add_argument("--modelo", default=None,
+                        help="Modelo de texto para traducción ollama (default: prompts.yaml traduccion.*)")
     parser.add_argument("--motor", default="google",
                         choices=["glosario", "google", "argos", "ollama"],
                         help="Motor de traducción: google (default, sin Ollama) | "

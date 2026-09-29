@@ -12,7 +12,7 @@ Algoritmo:
   5. Muestrear ~N imágenes distribuidas dentro de cada escena
   6. Seleccionar las mejores por nitidez (sin IA, varianza Laplaciano)
   7. Analizar la imagen más representativa de cada escena con UNA llamada
-     de visión (PROMPT_COMBINADO: keywords + descripción)
+     de visión (prompt combinado de prompts.yaml: keywords + descripción)
   8. Guardar resultados en DB y/o sidecar
 
 Formato del sidecar .video.json:
@@ -76,7 +76,8 @@ from typing import Any, Optional
 # Permitir importar scripts/ como paquete
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from scripts.ai_media.image_analysis import analizar_imagen_completo, MODELO_VISION_DEFAULT
+from scripts.ai_media.image_analysis import analizar_imagen_completo
+from scripts.ai_media.prompts import get_config
 from scripts.ai_media.batch_selector import seleccionar_mejores_n
 
 logger = logging.getLogger(__name__)
@@ -87,12 +88,17 @@ EXT_VIDEO = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mxf", ".mts", ".m2ts"}
 # Claves en media_metadata
 KEY_VIDEO_ANALYSIS = "video_analysis"
 
-# Modelos de visión recomendados (default real: minicpm-v4.6, ver MODELO_VISION_DEFAULT)
+# Modelos de visión recomendados (default efectivo: prompts.yaml vision.combinado)
 MODELOS_RECOMENDADOS = ["minicpm-v4.6:latest", "qwen2.5vl:latest", "qwen2.5vl:3b",
                         "llama3.2-vision:latest", "gemma4:e4b"]
 
 # Sensibilidad por defecto para scene detection (0.0 - 1.0, menor = más sensible)
 SENSIBILIDAD_ESCENA = 0.4
+
+
+def _modelo_efectivo(modelo: str | None) -> str:
+    """Modelo de visión efectivo (explícito > prompts.yaml vision.combinado)."""
+    return modelo or get_config("vision.combinado")["modelo"]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -522,13 +528,13 @@ MAX_KEYWORDS_POR_ESCENA = 20
 
 def analizar_escena(
     ruta_fotograma: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     usar_proxy: bool = True,
 ) -> dict[str, Any]:
     """
     Analiza el fotograma representativo de una escena con UNA llamada de IA.
 
-    Usa PROMPT_COMBINADO (keywords + descripción en un solo JSON) con
+    Usa el prompt combinado de prompts.yaml (keywords + descripción en un solo JSON) con
     temperatura baja para resultados estables.
 
     Args:
@@ -592,7 +598,7 @@ def _elegir_mejores_por_nitidez(
 
 def analizar_video(
     ruta: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     imgs_por_escena: int = 10,
     mejores_por_escena: int = 3,
     sensibilidad: float = SENSIBILIDAD_ESCENA,
@@ -608,12 +614,13 @@ def analizar_video(
       1. Se muestrean ~`imgs_por_escena` fotogramas distribuidos en la escena.
       2. Se eligen las `mejores_por_escena` imágenes por nitidez (sin IA).
       3. La imagen más nítida se analiza con UNA llamada de visión
-         (PROMPT_COMBINADO: keywords + descripción de la escena).
+         (prompt combinado de prompts.yaml: keywords + descripción de la escena).
 
     Returns:
         Dict con el análisis completo (escenas + fotogramas planos), o None
         si falló.
     """
+    modelo = _modelo_efectivo(modelo)
     nombre = Path(ruta).name
 
     if dry_run:
@@ -743,7 +750,7 @@ def analizar_video(
 
 def procesar_desde_db(
     ruta_db: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     imgs_por_escena: int = 10,
     mejores_por_escena: int = 3,
     sensibilidad: float = SENSIBILIDAD_ESCENA,
@@ -815,7 +822,7 @@ def procesar_desde_db(
 
 def procesar_desde_carpeta(
     carpeta: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     imgs_por_escena: int = 10,
     mejores_por_escena: int = 3,
     sensibilidad: float = SENSIBILIDAD_ESCENA,
@@ -879,7 +886,7 @@ def procesar_desde_carpeta(
 
 def procesar_archivo_individual(
     ruta: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     imgs_por_escena: int = 10,
     mejores_por_escena: int = 3,
     sensibilidad: float = SENSIBILIDAD_ESCENA,
@@ -983,9 +990,9 @@ def main(argv: list[str] | None = None):
     modo.add_argument("--db", help="Ruta a la base de datos SQLite")
     modo.add_argument("--folder", help="Ruta a carpeta con videos")
 
-    parser.add_argument("--modelo", default=MODELO_VISION_DEFAULT,
-                        help=f"Modelo de visión. Usar --list-models para "
-                             f"ver los instalados. (default: {MODELO_VISION_DEFAULT})")
+    parser.add_argument("--modelo", default=None,
+                        help="Modelo de visión (default: prompts.yaml vision.combinado). "
+                             "Usar --list-models para ver los instalados.")
     parser.add_argument("--por-escena", dest="imgs_por_escena", type=int, default=10,
                         help="Imágenes a muestrear dentro de cada escena "
                              "(default: 10; si la escena dura menos, se toman las que quepan)")

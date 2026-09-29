@@ -54,7 +54,6 @@ from scripts.ai_media.image_analysis import (
     extraer_keywords,
     describir_imagen,
     analizar_imagen_completo,
-    MODELO_VISION_DEFAULT,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +70,7 @@ MODE_COMBINADO = "combinado"      # keywords + descripción en UNA llamada (defa
 MODE_KEYWORDS = "keywords"        # solo keywords (rápido)
 MODE_DESCRIPCION = "descripcion"   # solo descripción
 
-# Modelos de visión recomendados (default real: minicpm-v4.6, ver MODELO_VISION_DEFAULT)
+# Modelos de visión recomendados (default efectivo: prompts.yaml vision.*)
 MODELOS_RECOMENDADOS = ["minicpm-v4.6:latest", "qwen2.5vl:latest", "qwen2.5vl:3b",
                         "llama3.2-vision:latest", "gemma4:e4b"]
 
@@ -329,7 +328,7 @@ def guardar_en_db(conn: sqlite3.Connection, media_id: int, resultado: dict[str, 
 
 def etiquetar_imagen(
     ruta: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     usar_proxy: bool = True,
     modo: str = MODE_COMBINADO,
 ) -> dict[str, Any]:
@@ -338,7 +337,7 @@ def etiquetar_imagen(
 
     Args:
         ruta: Ruta a la imagen.
-        modelo: Modelo de visión.
+        modelo: Modelo de visión (None = prompts.yaml vision.* según modo).
         usar_proxy: Si True, redimensiona la imagen antes de enviar a la IA.
         modo: "combinado" -> una sola llamada (default, recomendado),
               "keywords"  -> solo tags (rápido),
@@ -354,11 +353,10 @@ def etiquetar_imagen(
         ValueError: Si falla la extracción.
     """
     if modo == MODE_COMBINADO:
-        # Una sola llamada a la IA para ambos
+        # Una sola llamada a la IA para ambos (modelo/temp de prompts.yaml)
         resultado = analizar_imagen_completo(
             ruta,
             modelo=modelo,
-            temperatura=0.2,
             usar_proxy=usar_proxy,
         )
         return {
@@ -371,7 +369,6 @@ def etiquetar_imagen(
         keywords = extraer_keywords(
             ruta,
             modelo=modelo,
-            temperatura=0.2,
             usar_proxy=usar_proxy,
         )
         return {
@@ -384,7 +381,6 @@ def etiquetar_imagen(
         descripcion = describir_imagen(
             ruta,
             modelo=modelo,
-            temperatura=0.3,
             usar_proxy=usar_proxy,
         )
         return {
@@ -451,7 +447,7 @@ def procesar_imagen(
 
 def procesar_desde_db(
     ruta_db: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     limite: Optional[int] = None,
     sidecar: bool = False,
     usar_proxy: bool = True,
@@ -527,7 +523,7 @@ def procesar_desde_db(
 
 def procesar_desde_carpeta(
     carpeta: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     sidecar: bool = True,
     usar_proxy: bool = True,
     dry_run: bool = False,
@@ -654,9 +650,9 @@ def main():
     modo.add_argument("--folder", help="Ruta a carpeta con imágenes (modo autónomo)")
 
     # Opciones generales
-    parser.add_argument("--modelo", default=MODELO_VISION_DEFAULT,
-                        help=f"Modelo de visión Ollama. Usar --list-models para ver "
-                             f"los instalados. (default: {MODELO_VISION_DEFAULT})")
+    parser.add_argument("--modelo", default=None,
+                        help="Modelo de visión Ollama (default: prompts.yaml vision.*). "
+                             "Usar --list-models para ver los instalados.")
     parser.add_argument("--no-proxy", action="store_true",
                         help="No usar proxies (deshabilita redimensionado automático)")
     parser.add_argument("--dry-run", action="store_true",

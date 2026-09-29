@@ -49,6 +49,22 @@ import sqlite3
 import sys
 import time
 
+try:
+    from scripts.ai_media.prompts import get_config, get_prompt
+except ImportError:
+    # Ejecución directa como script (python scripts/ai_media/x.py o vía
+    # subprocess desde flujos.py): cargar prompts.py por ruta de archivo,
+    # sin pasar por el paquete `scripts` (su __init__ arrastra dependencias
+    # pesadas y el nombre puede venir cacheado de otro lado en sys.modules).
+    import importlib.util
+    _PROMPTS_PATH = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "prompts.py")
+    _spec = importlib.util.spec_from_file_location("flujos_prompts", _PROMPTS_PATH)
+    _modulo_prompts = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_modulo_prompts)
+    get_config = _modulo_prompts.get_config
+    get_prompt = _modulo_prompts.get_prompt
+
 log = logging.getLogger(__name__)
 
 # ── Claves en DB ─────────────────────────────────────────────────────────────
@@ -58,8 +74,8 @@ CLAVE_TEXTO_COMPLETO = "texto_completo"        # clave de entrada (textos .md)
 CLAVE_SALIDA_TEXTO = "ia_keywords_texto"       # salida (keywords textos)
 
 # ── Modelo de texto para extracción de keywords ──────────────────────────────
-# gemma3:latest ganó el A/B (93 llamadas, Ago 2026) contra qwen2.5:3b con el
-# prompt endurecido P2 (ver PROMPT_KEYWORDS_TRANSCRIPCION / PROMPT_KEYWORDS_TEXTO).
+# Default efectivo en prompts.yaml (sentido.transcripcion / sentido.texto).
+# gemma3 ganó el A/B contra qwen2.5:3b (ver comentarios en el YAML).
 MODELO_TEXTO_DEFAULT = "gemma3:latest"
 
 # ── Umbrales ─────────────────────────────────────────────────────────────────
@@ -68,50 +84,11 @@ MAX_TEXTO_CHARS = 6000        # truncar el texto que se envía al modelo
 MAX_KEYWORDS = 5              # cap defensivo: el prompt pide exactamente 5; recortar si devuelve más
 TIMEOUT_SEG = 120             # timeout de la llamada a Ollama
 
-# ── Prompts de extracción (mismas reglas; cambia la cabecera) ────────────────
-# Prompt FUSIONADO (Ene 2026): las 7 reglas endurecidas P2 (ganadoras del A/B
-# contra qwen2.5:3b) + contrato de salida JSON con EXACTAMENTE 5 keywords
-# (gemma saturaba el viejo "entre 5 y 8" siempre en 8, fragmentando la nube).
-# El terminador ("Transcripción:\n" / "Texto:\n") y la estructura de
-# concatenación NO cambian: `extraer_keywords_*` concatena prompt + texto
-# fuente, por lo que el parseo queda intacto.
-PROMPT_KEYWORDS_TRANSCRIPCION = (
-    "Analizá la transcripción y extraé las keywords del SENTIDO de lo que se dice "
-    "(de qué trata realmente, no de las palabras sueltas).\n"
-    "Reglas OBLIGATORIAS:\n"
-    "1. Formato: SOLO un objeto JSON válido con exactamente 5 keywords en ESPAÑOL: "
-    "{\"tags\": [\"a\", \"b\", \"c\", \"d\", \"e\"]}. Sin texto adicional. El ejemplo es solo "
-    "formato; sus tags NO pertenecen a este texto.\n"
-    "2. Las keywords salen del SIGNIFICADO: temas, lugares, actividades, personas, emociones, "
-    "clima, objetos, transporte, comida, sensaciones.\n"
-    "3. PROHIBIDO palabras vacías o muletillas: bien, buen, buena, bueno, finalmente, falta, "
-    "tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo tema central).\n"
-    "4. NO copies errores de transcripción: si una palabra es artefacto de voz, ignorala.\n"
-    "5. Sé FIEL: no agregues interpretaciones que el texto no sostenga (si se ayudaron → "
-    "'solidaridad', nunca 'sociedad individualista').\n"
-    "6. Escribí bien las compuestas: respetá género y número.\n"
-    "7. Preferí palabras de contenido concreto antes que adverbios o adjetivos genéricos.\n\n"
-    "Transcripción:\n"
-)
-
-PROMPT_KEYWORDS_TEXTO = (
-    "Analizá este **texto** y extraé las keywords del SENTIDO de lo que se dice "
-    "(de qué trata realmente, no de las palabras sueltas).\n"
-    "Reglas OBLIGATORIAS:\n"
-    "1. Formato: SOLO un objeto JSON válido con exactamente 5 keywords en ESPAÑOL: "
-    "{\"tags\": [\"a\", \"b\", \"c\", \"d\", \"e\"]}. Sin texto adicional. El ejemplo es solo "
-    "formato; sus tags NO pertenecen a este texto.\n"
-    "2. Las keywords salen del SIGNIFICADO: temas, lugares, actividades, personas, emociones, "
-    "clima, objetos, transporte, comida, sensaciones.\n"
-    "3. PROHIBIDO palabras vacías o muletillas: bien, buen, buena, bueno, finalmente, falta, "
-    "tranquilo, cuidado, solo, siempre, después, ya, cosa, algo, 'luz' (salvo tema central).\n"
-    "4. NO copies errores de transcripción: si una palabra es artefacto de voz, ignorala.\n"
-    "5. Sé FIEL: no agregues interpretaciones que el texto no sostenga (si se ayudaron → "
-    "'solidaridad', nunca 'sociedad individualista').\n"
-    "6. Escribí bien las compuestas: respetá género y número.\n"
-    "7. Preferí palabras de contenido concreto antes que adverbios o adjetivos genéricos.\n\n"
-    "Texto:\n"
-)
+# ── Prompts de extracción (editables en prompts.yaml, grupo "sentido") ───────
+# Mismas reglas en ambos orígenes; cambia la cabecera. El terminador
+# ("Transcripción:\n" / "Texto:\n") y la concatenación prompt + texto fuente
+# NO cambian, por lo que el parseo queda intacto. Se resuelven en vivo vía
+# _config_origen() (argumento explícito > YAML > DEFAULTS en prompts.py).
 
 # Muletillas / ruido común del habla humano que el modelo podría dejar pasar
 MULETILLAS = {
@@ -144,14 +121,14 @@ ORIGENES: dict[str, dict] = {
         "clave_entrada": CLAVE_SEGMENTOS,
         "clave_salida": CLAVE_SALIDA_TRANSCRIPCION,
         "tipos": ("audio", "video"),
-        "prompt": PROMPT_KEYWORDS_TRANSCRIPCION,
+        "clave_prompt": "sentido.transcripcion",
         "etiqueta": "transcripciones",
     },
     ORIGEN_TEXTO: {
         "clave_entrada": CLAVE_TEXTO_COMPLETO,
         "clave_salida": CLAVE_SALIDA_TEXTO,
         "tipos": ("text",),
-        "prompt": PROMPT_KEYWORDS_TEXTO,
+        "clave_prompt": "sentido.texto",
         "etiqueta": "textos",
     },
 }
@@ -160,13 +137,17 @@ ORIGENES: dict[str, dict] = {
 def _config_origen(origen: str) -> dict:
     """
     Valida el origen elegido y devuelve su configuración (claves, tipos,
-    prompt). Eleva ValueError si el origen no existe.
+    prompt resuelto en vivo desde prompts.yaml). Eleva ValueError si el
+    origen no existe.
     """
     if origen not in ORIGENES:
         raise ValueError(
             f"Origen inválido: {origen!r}. Válidos: {', '.join(ORIGENES)}"
         )
-    return ORIGENES[origen]
+    cfg = ORIGENES[origen]
+    cfg["prompt"] = get_prompt(cfg["clave_prompt"])
+    cfg["temperatura"] = get_config(cfg["clave_prompt"])["temperatura"]
+    return cfg
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -316,8 +297,10 @@ def _parsear_keywords(respuesta: str) -> list[str]:
 def extraer_keywords_transcripcion(
     cliente,
     texto: str,
-    modelo: str,
+    modelo: str | None,
     prompt: str | None = None,
+    temperatura: float | None = None,
+    clave_prompt: str = "sentido.transcripcion",
 ) -> list[str]:
     """
     Llama al modelo de texto y devuelve las keywords del texto fuente.
@@ -325,14 +308,22 @@ def extraer_keywords_transcripcion(
     Args:
         cliente: ollama.Client
         texto: Texto fuente (transcripción combinada o texto_completo directo).
-        modelo: Nombre del modelo de texto (ej: gemma3:latest).
-        prompt: Template del prompt. Si no se pasa, se usa el de transcripciones.
+        modelo: Nombre del modelo de texto (None = prompts.yaml).
+        prompt: Template del prompt. Si no se pasa, se resuelve en vivo
+            desde prompts.yaml (clave_prompt).
+        temperatura: Temperatura (None = prompts.yaml).
+        clave_prompt: Clave prompts.yaml del origen ("sentido.transcripcion" default).
 
     Returns:
         Lista de keywords en español.
     """
+    cfg = get_config(clave_prompt)
+    if modelo is None:
+        modelo = cfg["modelo"]
     if prompt is None:
-        prompt = PROMPT_KEYWORDS_TRANSCRIPCION
+        prompt = cfg["texto"]
+    if temperatura is None:
+        temperatura = cfg["temperatura"]
 
     # Truncar textos muy largos (protección de contexto)
     if len(texto) > MAX_TEXTO_CHARS:
@@ -344,7 +335,7 @@ def extraer_keywords_transcripcion(
     respuesta = cliente.chat(
         model=modelo,
         messages=[{"role": "user", "content": prompt_final}],
-        options={"num_ctx": 4096, "temperature": 0.2},
+        options={"num_ctx": 4096, "temperature": temperatura},
     ).message.content.strip()
 
     return _parsear_keywords(respuesta)[:MAX_KEYWORDS]
@@ -416,8 +407,8 @@ def main(argv: list[str] | None = None) -> None:
                              "whisper_segments) o 'texto' (media type='text' con texto_completo).")
     parser.add_argument("--mode", default="skip", choices=["skip", "update", "replace"],
                         help="skip: solo sin keywords (default) | update: todos | replace: limpia y regenera")
-    parser.add_argument("--modelo", default=MODELO_TEXTO_DEFAULT,
-                        help=f"Modelo de texto para extracción (default: {MODELO_TEXTO_DEFAULT})")
+    parser.add_argument("--modelo", default=None,
+                        help="Modelo de texto para extracción (default: prompts.yaml sentido.*)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Limitar a N registros (para pruebas)")
     parser.add_argument("--dry-run", action="store_true",
@@ -470,7 +461,8 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     log.info("  Registros con %s: %d (origen=%s, mode=%s, modelo=%s)",
-             cfg["clave_entrada"], len(rows), args.origen, args.mode, args.modelo)
+             cfg["clave_entrada"], len(rows), args.origen, args.mode,
+             args.modelo or get_config(cfg["clave_prompt"])["modelo"])
 
     # ── Dry-run (sin escribir) ──
     if args.dry_run:
@@ -489,7 +481,9 @@ def main(argv: list[str] | None = None) -> None:
                     if asegurar_ollama():
                         cliente = ollama.Client(timeout=TIMEOUT_SEG)
                         keywords = extraer_keywords_transcripcion(
-                            cliente, texto, args.modelo, prompt=cfg["prompt"])
+                            cliente, texto, args.modelo, prompt=cfg["prompt"],
+                            temperatura=cfg["temperatura"],
+                            clave_prompt=cfg["clave_prompt"])
                         print(f"    keywords propuestas: {', '.join(keywords) if keywords else '—'}")
                     else:
                         print("    ⚠ Ollama no disponible, no se probó la llamada.")
@@ -549,7 +543,9 @@ def _ejecutar(conn, args, rows) -> None:
 
         try:
             keywords = extraer_keywords_transcripcion(
-                cliente, texto, args.modelo, prompt=cfg["prompt"])
+                cliente, texto, args.modelo, prompt=cfg["prompt"],
+                temperatura=cfg["temperatura"],
+                clave_prompt=cfg["clave_prompt"])
         except Exception as e:
             log.warning("  ⚠ Error extrayendo keywords de media %s: %s", mid, e)
             errors += 1

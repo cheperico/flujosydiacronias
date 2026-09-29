@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 from scripts.ai_media.ollama_client import OllamaVision, asegurar_ollama
+from scripts.ai_media.prompts import get_config
 from scripts.ai_media.proxy import obtener_proxy
 
 logger = logging.getLogger(__name__)
@@ -56,40 +57,25 @@ logger = logging.getLogger(__name__)
 MODELO_VISION_DEFAULT = "minicpm-v4.6:latest"
 
 # ──────────────────────────────────────────────
-#  PROMPTS (en inglés, mínimos — validados Ago 2026)
+#  PROMPTS (editables en scripts/ai_media/prompts.yaml, grupo "vision")
 # ──────────────────────────────────────────────
-# minicpm responde mejor a prompts simples. Las keywords son libres (EN):
-# NO se pide ni se valida género fotográfico (descartado Ago 2026).
-# Prompts de descripción reescritos (2026-08-14) para evitar ecos de
-# meta-intro: sin "Give me", con "start directly with the scene, without
-# any preamble" (limpiar_meta_intro sigue como red de seguridad).
+# Textos, modelos y temperaturas viven en prompts.yaml y se resuelven
+# vía _resolver_vision() en cada función
+# (argumento explícito > YAML > DEFAULTS embebidos en prompts.py).
 
-PROMPT_KEYWORDS = "Give me exactly 5 keywords for this image, comma-separated."
 
-PROMPT_DESCRIBIR = (
-    "Describe what you see in this image in detail. "
-    "Start directly with the scene, without any preamble."
-)
-
-PROMPT_COMBINADO = (
-    "Respond with ONLY JSON about THIS image with two fields:\n"
-    '1. "keywords": exactly 5 keywords comma-separated, describing ONLY the '
-    "content of THIS image.\n"
-    '2. "description": a long description of THIS image, written directly '
-    "without preamble or meta-commentary.\n"
-    'Exact format: {"keywords": ["sofa", "bookshelf", "lamp", "carpet", "window"], '
-    '"description": "Long description text here."}\n'
-    "The JSON format above is just an example; its keywords are NOT part of "
-    "this image. List keywords only from what YOU see in THIS image.\n"
-    "Nothing else but the JSON."
-)
-
-PROMPT_CLASIFICAR = (
-    "Clasificá esta imagen en una de estas categorías: "
-    "naturaleza, urbano, retrato, abstracto, documento, evento, paisaje, arquitectura, "
-    "objeto, arte, comida, tecnología, deporte, noche, macro, otras. "
-"Respondé solo con el nombre de la categoría."
-)
+def _resolver_vision(
+    clave: str,
+    modelo: str | None,
+    temperatura: float | None,
+) -> tuple[str, float, str]:
+    """Resuelve (modelo, temperatura, texto) para una clave prompts.yaml."""
+    cfg = get_config(clave)
+    return (
+        modelo or cfg["modelo"],
+        cfg["temperatura"] if temperatura is None else temperatura,
+        cfg["texto"],
+    )
 
 # ── Prefijos de meta-intro regurgitados por el modelo (EN) ────────────────
 # minicpm a veces abre la descripción con una meta-introducción del prompt
@@ -208,8 +194,8 @@ def limpiar_meta_intro(texto: str) -> str:
 
 def extraer_keywords(
     ruta_imagen: str,
-    modelo: str = MODELO_VISION_DEFAULT,
-    temperatura: float = 0.2,
+    modelo: str | None = None,
+    temperatura: float | None = None,
     usar_proxy: bool = True,
 ) -> list[str]:
     """
@@ -217,8 +203,9 @@ def extraer_keywords(
 
     Args:
         ruta_imagen: Ruta al archivo de imagen.
-        modelo: Modelo de visión a usar. Por defecto MODELO_VISION_DEFAULT.
-        temperatura: Control de creatividad. Bajo para keywords predecibles.
+        modelo: Modelo de visión a usar (None = prompts.yaml vision.keywords_solo).
+        temperatura: Control de creatividad. Bajo para keywords predecibles
+            (None = prompts.yaml).
         usar_proxy: Si True, usa proxy redimensionado a 800px para acelerar.
 
     Returns:
@@ -228,12 +215,14 @@ def extraer_keywords(
         FileNotFoundError: Si la imagen no existe.
         ValueError: Si no se pudieron extraer keywords.
     """
+    modelo, temperatura, prompt = _resolver_vision(
+        "vision.keywords_solo", modelo, temperatura)
     ruta_proxy = obtener_proxy(ruta_imagen, usar_proxy=usar_proxy)
     cliente = OllamaVision(modelo=modelo)
 
     respuesta = cliente.analizar_imagen(
         ruta_proxy,
-        prompt=PROMPT_KEYWORDS,
+        prompt=prompt,
         temperatura=temperatura,
     )
 
@@ -257,8 +246,8 @@ def extraer_keywords(
 
 def extraer_keywords_batch(
     rutas_imagenes: list[str],
-    modelo: str = MODELO_VISION_DEFAULT,
-    temperatura: float = 0.2,
+    modelo: str | None = None,
+    temperatura: float | None = None,
     usar_proxy: bool = True,
 ) -> list[dict]:
     """
@@ -266,8 +255,8 @@ def extraer_keywords_batch(
 
     Args:
         rutas_imagenes: Lista de rutas a imágenes.
-        modelo: Modelo de visión.
-        temperatura: Control de creatividad.
+        modelo: Modelo de visión (None = prompts.yaml vision.keywords_solo).
+        temperatura: Control de creatividad (None = prompts.yaml).
         usar_proxy: Si True, usa proxies redimensionados.
 
     Returns:
@@ -281,10 +270,12 @@ def extraer_keywords_batch(
 
     rutas_proxy_solo = [p for _, p in rutas_proxy]
 
+    modelo, temperatura, prompt = _resolver_vision(
+        "vision.keywords_solo", modelo, temperatura)
     cliente = OllamaVision(modelo=modelo)
     resultados_vision = cliente.analizar_imagenes(
         rutas_proxy_solo,
-        prompt=PROMPT_KEYWORDS,
+        prompt=prompt,
         temperatura=temperatura,
     )
 
@@ -309,8 +300,8 @@ def extraer_keywords_batch(
 
 def describir_imagen(
     ruta_imagen: str,
-    modelo: str = MODELO_VISION_DEFAULT,
-    temperatura: float = 0.3,
+    modelo: str | None = None,
+    temperatura: float | None = None,
     usar_proxy: bool = True,
 ) -> str:
     """
@@ -318,36 +309,39 @@ def describir_imagen(
 
     Args:
         ruta_imagen: Ruta al archivo de imagen.
-        modelo: Modelo de visión (por defecto moondream).
-        temperatura: Control de creatividad.
+        modelo: Modelo de visión (None = prompts.yaml vision.describir_solo).
+        temperatura: Control de creatividad (None = prompts.yaml).
         usar_proxy: Si True, usa proxy redimensionado.
 
     Returns:
         Descripción textual de la imagen.
     """
+    modelo, temperatura, prompt = _resolver_vision(
+        "vision.describir_solo", modelo, temperatura)
     ruta_proxy = obtener_proxy(ruta_imagen, usar_proxy=usar_proxy)
     cliente = OllamaVision(modelo=modelo)
     return limpiar_meta_intro(
-        cliente.analizar_imagen(ruta_proxy, PROMPT_DESCRIBIR, temperatura)
+        cliente.analizar_imagen(ruta_proxy, prompt, temperatura)
     )
 
 
 def analizar_imagen_completo(
     ruta_imagen: str,
-    modelo: str = MODELO_VISION_DEFAULT,
-    temperatura: float = 0.2,
+    modelo: str | None = None,
+    temperatura: float | None = None,
     usar_proxy: bool = True,
 ) -> dict:
     """
     Analiza una imagen con UNA sola llamada a la IA y devuelve
     tanto keywords como descripción.
 
-    Usa PROMPT_COMBINADO que pide un JSON con ambos campos.
+    Usa el prompt combinado (prompts.yaml vision.combinado) que pide
+    un JSON con ambos campos.
 
     Args:
         ruta_imagen: Ruta al archivo de imagen.
-        modelo: Modelo de visión (por defecto moondream).
-        temperatura: Control de creatividad.
+        modelo: Modelo de visión (None = prompts.yaml vision.combinado).
+        temperatura: Control de creatividad (None = prompts.yaml).
         usar_proxy: Si True, usa proxy redimensionado.
 
     Returns:
@@ -358,12 +352,14 @@ def analizar_imagen_completo(
         FileNotFoundError: Si la imagen no existe.
         ValueError: Si no se pudo parsear el JSON de respuesta.
     """
+    modelo, temperatura, prompt = _resolver_vision(
+        "vision.combinado", modelo, temperatura)
     ruta_proxy = obtener_proxy(ruta_imagen, usar_proxy=usar_proxy)
     cliente = OllamaVision(modelo=modelo)
 
     respuesta = cliente.analizar_imagen(
         ruta_proxy,
-        prompt=PROMPT_COMBINADO,
+        prompt=prompt,
         temperatura=temperatura,
     )
 
@@ -392,8 +388,8 @@ def analizar_imagen_completo(
 
 def analizar_imagen_completo_batch(
     rutas_imagenes: list[str],
-    modelo: str = MODELO_VISION_DEFAULT,
-    temperatura: float = 0.2,
+    modelo: str | None = None,
+    temperatura: float | None = None,
     usar_proxy: bool = True,
 ) -> list[dict]:
     """
@@ -402,8 +398,8 @@ def analizar_imagen_completo_batch(
 
     Args:
         rutas_imagenes: Lista de rutas a imágenes.
-        modelo: Modelo de visión.
-        temperatura: Control de creatividad.
+        modelo: Modelo de visión (None = prompts.yaml vision.combinado).
+        temperatura: Control de creatividad (None = prompts.yaml).
         usar_proxy: Si True, usa proxies redimensionados.
 
     Returns:
@@ -416,10 +412,12 @@ def analizar_imagen_completo_batch(
 
     rutas_proxy_solo = [p for _, p in rutas_proxy]
 
+    modelo, temperatura, prompt = _resolver_vision(
+        "vision.combinado", modelo, temperatura)
     cliente = OllamaVision(modelo=modelo)
     resultados_vision = cliente.analizar_imagenes(
         rutas_proxy_solo,
-        prompt=PROMPT_COMBINADO,
+        prompt=prompt,
         temperatura=temperatura,
     )
 
@@ -636,7 +634,7 @@ def _parsear_combinado(respuesta: str) -> Optional[dict]:
 
 def clasificar_imagen(
     ruta_imagen: str,
-    modelo: str = MODELO_VISION_DEFAULT,
+    modelo: str | None = None,
     usar_proxy: bool = True,
 ) -> str:
     """
@@ -644,15 +642,17 @@ def clasificar_imagen(
 
     Args:
         ruta_imagen: Ruta al archivo de imagen.
-        modelo: Modelo de visión.
+        modelo: Modelo de visión (None = prompts.yaml vision.clasificar).
         usar_proxy: Si True, usa proxy redimensionado.
 
     Returns:
         Nombre de la categoría.
     """
+    modelo, temperatura, prompt = _resolver_vision(
+        "vision.clasificar", modelo, None)
     ruta_proxy = obtener_proxy(ruta_imagen, usar_proxy=usar_proxy)
     cliente = OllamaVision(modelo=modelo)
-    return cliente.analizar_imagen(ruta_proxy, PROMPT_CLASIFICAR, temperatura=0.1)
+    return cliente.analizar_imagen(ruta_proxy, prompt, temperatura=temperatura)
 
 
 def _parsear_keywords(respuesta: str) -> list[str]:
@@ -764,8 +764,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("imagenes", nargs="+", help="Rutas a las imágenes")
     # Opciones generales
-    parser.add_argument("--modelo", default=MODELO_VISION_DEFAULT,
-                        help=f"Modelo de visión Ollama. (default: {MODELO_VISION_DEFAULT})")
+    parser.add_argument("--modelo", default=None,
+                        help="Modelo de visión Ollama (default: prompts.yaml vision.*)")
     parser.add_argument("--list-models", action="store_true",
                         help="Mostrar modelos Ollama instalados y salir")
     parser.add_argument("--action", default="keywords",
